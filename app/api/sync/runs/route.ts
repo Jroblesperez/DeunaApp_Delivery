@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';import {snapshotEngine} from '@/lib/snapshot/engine';export async function GET(){return NextResponse.json(envelope(snapshotEngine.history('org-deuna-ecuador'),96))}

@@ -1,0 +1,1 @@
+export const decisionTypeLabels={APPROVE:'Aprobar',ESCALATE:'Escalar',REPRIORITIZE:'Repriorizar',REALLOCATE_CAPACITY:'Reasignar capacidad',ACCEPT_RISK:'Aceptar riesgo',DELAY_RELEASE:'Aplazar release',REQUEST_ACTION_PLAN:'Solicitar plan de acción',RESOLVE_DEPENDENCY:'Resolver dependencia',REVIEW_SCOPE:'Revisar alcance',CONFIRM_COMMITMENT:'Confirmar compromiso'} as const;

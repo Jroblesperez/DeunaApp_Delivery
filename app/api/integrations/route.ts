@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';import {integrations} from '@/lib/enterprise/data';export async function GET(){return NextResponse.json(envelope(integrations,96,['Jira Service Management opera con cobertura parcial']))}

@@ -16,6 +16,7 @@ import {
   generateOrganizationalPulse,
   generateStrategicMovements,
 } from '@/lib/experience';
+import { OutcomeProgress, PortfolioFlowMap, StrategyCapacityView, StrategyExecutionMap } from '@/components/enterprise/strategy';
 
 export default function Home() {
   const insights = generateActionableInsights();
@@ -28,34 +29,42 @@ export default function Home() {
     <ExecutiveGreeting />
     <ExecutiveNarrative narrative={narrative} insights={insights} />
 
-    <NarrativeSection eyebrow="DECISIONS BEFORE DASHBOARDS" title="Decisions that cannot wait" description="Ordered by impact, urgency, due date and recommendation confidence." action={<Link className="pill" href="/decisions">Open Decision Center →</Link>}>
+    <NarrativeSection eyebrow="DECISIONES ANTES QUE DASHBOARDS" title="Decisiones que no pueden esperar" description="Ordenadas por impacto, urgencia, fecha límite y confianza de la recomendación." action={<Link className="pill" href="/decisions">Abrir Centro de decisiones →</Link>}>
       <div className="actionable-grid">{insights.slice(0, 2).map((insight) => <ActionableInsightCard insight={insight} key={insight.id} />)}</div>
       <div className="brief-signals">{decisions.slice(0, 4).map((decision) => <span key={decision.id}><b>{decision.priority}</b> · {decision.owner} · due {decision.dueDate}</span>)}</div>
     </NarrativeSection>
 
-    <NarrativeSection eyebrow="ORGANIZATIONAL PULSE" title="Where leadership support is needed" description="A narrative health view across ECOs and CoEs — not another scorecard." action={<Link className="pill" href="/pulse">Explore organizational pulse →</Link>}>
+    <NarrativeSection eyebrow="ESTRATEGIA A EJECUCIÓN" title="Cómo se conectan los resultados con la ejecución" description="Nodos, flujo y capacidad responden preguntas ejecutivas concretas.">
+      <div className="strategic-grid"><StrategyExecutionMap /><PortfolioFlowMap /></div>
+    </NarrativeSection>
+
+    <NarrativeSection eyebrow="ESTRATEGIA Y CAPACIDAD" title="Dónde estamos invirtiendo la capacidad" description="Objetivo, compromiso, consumo y variación por tipo de iniciativa.">
+      <div className="strategic-grid"><StrategyCapacityView /><OutcomeProgress /></div>
+    </NarrativeSection>
+
+    <NarrativeSection eyebrow="PULSO ORGANIZACIONAL" title="Dónde se necesita apoyo de liderazgo" description="Salud narrativa de ECOs y CoEs, no otro scorecard." action={<Link className="pill" href="/pulse">Explorar Pulso organizacional →</Link>}>
       <div className="pulse-grid">{pulse.slice(0, 3).map((item) => <OrganizationalPulseCard pulse={item} key={item.id} />)}</div>
     </NarrativeSection>
 
-    <NarrativeSection eyebrow="STRATEGIC MOVEMENT" title="What changed — and why it matters" description="Threshold crossings, investment shifts and movement through the value stream." action={<Link className="pill" href="/intelligence#movement">View all movement →</Link>}>
+    <NarrativeSection eyebrow="MOVIMIENTO ESTRATÉGICO" title="Qué cambió y por qué importa" description="Cruces de umbral, cambios de inversión y movimiento en el value stream." action={<Link className="pill" href="/intelligence#movement">Ver movimiento →</Link>}>
       <div className="movement-grid">{movements.map((movement) => <StrategicMovementCard movement={movement} key={movement.id} />)}</div>
     </NarrativeSection>
 
-    <NarrativeSection eyebrow="PORTFOLIO ATTENTION" title="Signals behind the quarter" description="Each signal includes evidence, impact and a recommended next step." action={<Link className="pill" href="/initiatives">Explore initiatives →</Link>}>
+    <NarrativeSection eyebrow="ATENCIÓN DE PORTAFOLIO" title="Señales detrás del trimestre" description="Cada señal incluye evidencia, impacto y siguiente paso recomendado." action={<Link className="pill" href="/initiatives">Explorar iniciativas →</Link>}>
       <div className="actionable-grid">{insights.slice(2).map((insight) => <ActionableInsightCard insight={insight} compact key={insight.id} />)}</div>
     </NarrativeSection>
 
-    <NarrativeSection eyebrow="EVIDENCE & TRENDS" title="Secondary indicators" description="Scores are subordinate to the narrative and remain fully explainable.">
+    <NarrativeSection eyebrow="EVIDENCIA Y TENDENCIAS" title="Indicadores secundarios" description="Los scores están subordinados a la narrativa y son explicables.">
       <div className="secondary-kpis">
         <article className="secondary-kpi card"><span>STRATEGIC HEALTH</span><strong>72%</strong><small>+3.2 pts vs Q2</small><MetricExplanationDrawer label="Strategic health" value="72%" definition="Weighted execution health of strategic outcomes." formula="Actual OKR progress ÷ expected progress, weighted by priority" threshold="Healthy ≥ 80%; Watch 65–79%; At risk < 65%" components={['OKR progress','Initiative confidence','Traceability coverage']} /></article>
         <article className="secondary-kpi card"><span>DELIVERY CONFIDENCE</span><strong>68%</strong><small>−10 pts vs Q2</small><MetricExplanationDrawer label="Delivery confidence" value="68%" definition="Likelihood of active initiatives meeting committed dates." formula="Σ initiative confidence × strategic weight" threshold="Target ≥ 80%" components={['Forecast confidence','Flow aging','Open blockers']} /></article>
-        <article className="secondary-kpi card"><span>PORTFOLIO AT RISK</span><strong>9</strong><small>+3 vs Q2</small><MetricExplanationDrawer label="Portfolio at risk" value="9" definition="Initiatives requiring active intervention." formula="High/Critical risk OR confidence below 60%" threshold="Target ≤ 5" components={['Risk severity','Confidence','Target variance']} /></article>
+        <article className="secondary-kpi card"><span>PORTFOLIO AT RISK</span><strong>9</strong><small>+3 vs Q2</small><MetricExplanationDrawer label="Portfolio at risk" value="9" definition="Initiatives requiring active intervention." formula="High/Critical risk OR confidence below 60%" threshold="Target ≤ 5" components={['Risk severity','Confianza','Target variance']} /></article>
         <article className="secondary-kpi card"><span>RISK EXPOSURE</span><strong>High</strong><small>4 overdue plans</small><MetricExplanationDrawer label="Risk exposure" value="High" definition="Open exposure weighted by severity and aging." formula="Σ severity weight × aging factor" threshold="Critical if any overdue Critical control" components={['Risk items','Action plans','Vulnerabilities']} /></article>
-        <article className="secondary-kpi card"><span>DECISIONS OPEN</span><strong>{decisions.length}</strong><small>{decisions.filter((decision) => decision.priority === 'P0').length} require attention</small><MetricExplanationDrawer label="Open decisions" value={String(decisions.length)} definition="Rule-generated interventions not yet resolved." formula="Count of OPEN or UNDER_REVIEW decisions" threshold="P0 due ≤ 3 days requires attention" components={['Impact','Urgency','Confidence']} /></article>
+        <article className="secondary-kpi card"><span>DECISIONES ABIERTAS</span><strong>{decisions.length}</strong><small>{decisions.filter((decision) => decision.priority === 'P0').length} requieren atención</small><MetricExplanationDrawer label="Decisiones abiertas" value={String(decisions.length)} definition="Intervenciones generadas por reglas aún no resueltas." formula="Cantidad de decisiones Abiertas o En revisión" threshold="P0 con vencimiento ≤ 3 días requiere atención" components={['Impacto','Urgencia','Confianza']} /></article>
       </div>
     </NarrativeSection>
 
-    <NarrativeSection eyebrow="GUIDED INTELLIGENCE" title="Explore the evidence through a guided question">
+    <NarrativeSection eyebrow="INTELIGENCIA GUIADA" title="Explora la evidencia con una pregunta guiada">
       <ExecutiveCopilot insights={insights} />
     </NarrativeSection>
   </>;

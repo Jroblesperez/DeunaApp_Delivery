@@ -40,3 +40,13 @@ Incluye 1 organización, 9 ECO/CoE, 15 equipos, 36 iniciativas, dependencias, ma
 Copie `.env.example`; nunca confirme valores reales. `AUTH_MODE=demo` usa sesión controlada sin password. Para Entra ID, cambie a `entra`, configure tenant/client secret desde un secret manager y valide claims/grupos en backend. Las interfaces Jira en `lib/jira` soportan lectura, mapping, normalización y paginación; implemente OAuth 2.0 sin habilitar escritura. FlowOS expone envelopes con estado, fuente, cobertura y warnings para que Rovo interprete resultados calculados, sin agente generativo en el MVP.
 
 Más detalle: [`docs/architecture.md`](docs/architecture.md), [`docs/data-model.md`](docs/data-model.md), [`docs/jira-integration.md`](docs/jira-integration.md), [`docs/security.md`](docs/security.md), [`docs/rovo-readiness.md`](docs/rovo-readiness.md).
+
+## Enterprise Platform 3.0
+
+FlowOS opera por defecto con **Deuna Ecuador** y expone contexto persistente de trimestre, salud, cobertura, sincronización, conexiones y modo `DEMO DATA`. `/login` ofrece sesión demo controlada y prepara providers Entra ID/Atlassian; en producción `middleware.ts` protege rutas si `DEMO_MODE=false`. `/setup` guía la configuración inicial en diez pasos.
+
+El backoffice `/admin` centraliza Integration Hub, Centro de sincronización, proyectos Jira, Status Mapping, Custom Fields y calidad de datos. `Snapshot Engine` desacopla las pantallas de Jira mediante FULL/INCREMENTAL/MANUAL/SCHEDULED, checkpoints, deduplicación, cobertura parcial y fallback al último snapshot válido. Ninguna conexión demo realiza llamadas externas.
+
+Rutas Enterprise: `/login`, `/setup`, `/admin/integrations`, `/admin/sync`, `/admin/jira/projects`, `/admin/jira/status-mapping`, `/admin/jira/fields`, `/admin/data-quality`. APIs: `/api/organization/context`, `/api/integrations`, `/api/integrations/:id`, `/api/sync/status`, `/api/sync/runs`, `POST /api/sync/run`, `/api/admin/projects`, `/api/admin/status-mapping`, `/api/admin/field-mapping`, `/api/admin/data-quality`, `/api/strategy/map`, `/api/strategy/capacity`, `/api/strategy/flow`, `/api/auth/session`, `POST /api/auth/demo-login`, `POST /api/auth/logout`.
+
+Para un futuro modo LIVE: configure las variables Atlassian de `.env.example`, use referencias a secretos de vault, valide scopes read-only y mantenga tokens únicamente en backend. El MVP no registra aplicaciones, no conecta servicios reales y no escribe en Jira.

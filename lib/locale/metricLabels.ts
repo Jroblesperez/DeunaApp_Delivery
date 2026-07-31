@@ -1,0 +1,1 @@
+export const metricLabels:Record<string,string>={cycleTime:'Cycle Time',leadTime:'Lead Time',timeToDeploy:'Time to Deploy',capacityUtilization:'Utilización de capacidad',deliveryConfidence:'Delivery Confidence',openDependencies:'Dependencias abiertas',riskApprovalTime:'Tiempo de Risk Approval'};

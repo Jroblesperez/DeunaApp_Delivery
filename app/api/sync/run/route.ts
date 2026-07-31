@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';import {snapshotEngine} from '@/lib/snapshot/engine';export async function POST(){const run=snapshotEngine.start('org-deuna-ecuador','MANUAL');return NextResponse.json(envelope({...run,simulation:true},96,['Simulación local: no se contactó Atlassian']),{status:202})}
