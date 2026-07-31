@@ -1,0 +1,2 @@
+# Jira (futuro)
+`JiraClient` abstrae OAuth y búsquedas; `JiraPaginationService` recorre JQL paginado; `JiraIssueMapper` conserva sourceSystem/project/key/status/url; `JiraStatusNormalizer` desacopla 117 estados; `JiraDataSourceAdapter` declara modo `READ_ONLY`. Conectar Product Discovery, Software, JSM, Risks, CR/releases, custom fields, links y changelog mediante variables, sin tokens en código. Aplicar backoff, límites, cursores y registro de cobertura.
