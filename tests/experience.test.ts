@@ -21,7 +21,7 @@ describe('FlowOS Experience 2.0 decision intelligence', () => {
   it('produces an executive narrative with quantified, auditable claims', () => {
     const narrative = generateExecutiveNarrative();
     expect(narrative.situation).toContain('68%');
-    expect(narrative.changes).toContain('11 days');
+    expect(narrative.changes).toContain('11 días');
     expect(narrative.evidence.length).toBeGreaterThanOrEqual(3);
   });
 
