@@ -1,0 +1,3 @@
+import {NextResponse} from 'next/server';import {jiraEnvelope} from '@/lib/jira/api';import {jiraSnapshotStore} from '@/lib/jira/store';
+export const runtime='nodejs';export const dynamic='force-dynamic';
+export async function GET(){const snapshot=await jiraSnapshotStore.latest();if(!snapshot)return NextResponse.json(jiraEnvelope({dataMode:'DEMO',available:false},'UNAVAILABLE',['No existe un snapshot LIVE válido.'],0));return NextResponse.json(jiraEnvelope({dataMode:'LIVE',available:true,source:snapshot.source,lastSync:snapshot.completedAt,metrics:snapshot.metrics,coverage:snapshot.coverage,status:snapshot.status},snapshot.status==='PARTIAL'?'PARTIAL':'SUCCESS',snapshot.warnings,snapshot.coverage))}

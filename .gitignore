@@ -8,3 +8,5 @@ coverage
 *.tsbuildinfo
 .env.local
 .env.*.local
+.flowos-live
+.flowos-dev.*.log

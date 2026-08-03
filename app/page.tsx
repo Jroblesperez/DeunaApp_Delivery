@@ -17,6 +17,7 @@ import {
   generateStrategicMovements,
 } from '@/lib/experience';
 import { OutcomeProgress, PortfolioFlowMap, StrategyCapacityView, StrategyExecutionMap } from '@/components/enterprise/strategy';
+import { LiveExecutiveOverview } from '@/components/jira-live';
 
 export default function Home() {
   const insights = generateActionableInsights();
@@ -27,6 +28,7 @@ export default function Home() {
 
   return <>
     <ExecutiveGreeting />
+    <LiveExecutiveOverview />
     <ExecutiveNarrative narrative={narrative} insights={insights} />
 
     <NarrativeSection eyebrow="DECISIONES ANTES QUE DASHBOARDS" title="Decisiones que no pueden esperar" description="Ordenadas por impacto, urgencia, fecha límite y confianza de la recomendación." action={<Link className="pill" href="/decisions">Abrir Centro de decisiones →</Link>}>
