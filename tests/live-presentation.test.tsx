@@ -1,0 +1,27 @@
+// @vitest-environment jsdom
+import React from 'react';
+import {afterEach,describe,expect,it,vi} from 'vitest';
+import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import Home from '@/app/page';
+import IntegrationPage from '@/app/admin/integrations/page';
+import {DataModeBanner} from '@/components/shell';
+import {JiraIntegrationPanel,JiraSyncPanel,type LiveUi} from '@/components/jira-live';
+
+const metric=(value:unknown,status:'AVAILABLE'|'PARTIAL'|'UNAVAILABLE'='AVAILABLE')=>({value,status,coverage:100,evidence:['test']});
+const metrics={snapshotContext:{projectsAccessible:metric(5),issuesProcessed:metric(500),snapshotVersion:metric(3),syncMode:metric('FULL')},dataConfidence:{hierarchyCoverage:metric(60,'PARTIAL')},q3Activity:{activeInQ3:metric(20,'PARTIAL')},flowDistribution:{DEVELOPMENT:metric(16,'PARTIAL')},unavailable:{cycleTime:metric(null,'UNAVAILABLE')}};
+const live:LiveUi={data:{dataMode:'LIVE',available:true,semanticAvailable:true,schemaVersion:2,source:'Jira Cloud',lastSync:'2026-08-03T13:38:47.128Z',coverage:100,status:'PARTIAL',metrics,dataQuality:[]}};
+const q3={data:{snapshot:{version:5,lastUpdated:'2026-08-03T13:38:47.128Z',truncated:false,portfolioStatus:'COMPLETED'},pulse:{commitment:metric(4),progress:metric(null,'UNAVAILABLE')},flow:[{stage:'Building',initiatives:2,percentage:50,coverage:100,attention:false}],attention:[],ecoHealth:[],portfolioMix:[{type:'STRATEGIC',count:4,percentage:100}],businessImpact:{status:'UNAVAILABLE',message:'No medible'},dataConfidence:{quarter:metric(100)}}};
+const response=(body:unknown)=>Promise.resolve({json:()=>Promise.resolve(body)}) as Promise<Response>;
+
+afterEach(()=>{cleanup();vi.restoreAllMocks()});
+
+describe('LIVE presentation boundaries',()=>{
+  it('renders only canonical Q3 LIVE evidence on Home',async()=>{vi.stubGlobal('fetch',vi.fn((url)=>response(String(url).includes('/api/q3/overview')?q3:live)));render(<Home/>);await screen.findByText('Flow to Value');expect(screen.queryByText('Decisiones que no pueden esperar')).toBeNull();expect(screen.getByText('Compromiso vigente')).toBeTruthy();expect(screen.queryByText('INICIATIVAS DETECTADAS')).toBeNull()});
+  it('renders legacy prompt without legacy metrics',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{dataMode:'LIVE',available:true,semanticAvailable:false,legacyDetected:true}})));render(<Home/>);await screen.findByText('Snapshot legacy detectado');expect(screen.getByText('Requiere nuevo snapshot semántico.')).toBeTruthy();expect(screen.queryByText('TRABAJO ABIERTO')).toBeNull()});
+  it('renders one empty LIVE state without DEMO content',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{dataMode:'LIVE',available:false}})));render(<Home/>);await screen.findByText('Jira está configurado en modo LIVE, pero aún no existe un snapshot válido.');expect(screen.queryByText('Decisiones que no pueden esperar')).toBeNull();expect(screen.getByText('Ir a Integration Hub')).toBeTruthy();expect(screen.getByText('Ir al Centro de sincronización')).toBeTruthy()});
+  it('preserves the current DEMO experience in DEMO mode',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{dataMode:'DEMO',available:false}})));render(<Home/>);await screen.findByText('Decisiones que no pueden esperar');expect(screen.getByText('Dónde estamos invirtiendo la capacidad')).toBeTruthy()});
+  it('shows LIVE header context with real coverage and sync time',()=>{render(<DataModeBanner live={live}/>);expect(screen.getByText('LIVE DATA')).toBeTruthy();expect(screen.getByText(/Jira Cloud/)).toBeTruthy();expect(screen.getByText(/100% cobertura/)).toBeTruthy();expect(screen.getByText(/PARTIAL/)).toBeTruthy()});
+  it('does not render the Jira display name and keeps account id masked',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{accountDisplayName:'Real Person',accountIdMasked:'***6ad6',accessibleProjects:5,permissions:'READ_ONLY',durationMs:20},status:'SUCCESS',source:'Jira Cloud',lastUpdated:'2026-08-03T13:38:47.128Z',warnings:[],coverage:100})));render(<JiraIntegrationPanel/>);fireEvent.click(screen.getByText('Probar conexión'));await screen.findByText('Cuenta Jira conectada');expect(screen.queryByText('Real Person')).toBeNull();expect(screen.getByText(/\*\*\*6ad6/)).toBeTruthy()});
+  it('hides DEMO integration cards while the application is LIVE',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response(live)));render(<IntegrationPage/>);await screen.findByText('Conexión Jira Cloud LIVE en modo read-only.');expect(screen.queryByText('Fuentes DEMO y planificadas')).toBeNull()});
+  it('shows enriched incremental snapshot fields and grouped warnings',async()=>{const warnings=Array.from({length:7},(_,i)=>`Recurso ${i+1}: INACCESSIBLE`);vi.stubGlobal('fetch',vi.fn(()=>response({data:[{snapshotId:'jira-2026-long-snapshot-id',previousSnapshotId:'jira-2026-previous-snapshot-id',version:2,syncMode:'INCREMENTAL',correlationId:'corr',status:'PARTIAL',checkpoint:'2026-08-03T13:38:47.128Z',completedAt:'2026-08-03T13:38:47.128Z',projectsAccessible:['CPD','CR','DSP','EMD','ETT'],pagesProcessed:1,issuesProcessed:500,issuesChanged:0,coverage:100,truncated:false,durationMs:32460,warnings}]})));render(<JiraSyncPanel/>);await screen.findByText('v2 · PARTIAL');expect(screen.getAllByText('INCREMENTAL').length).toBeGreaterThan(0);expect(screen.getByText('500 / 0')).toBeTruthy();expect(screen.getByText('7 advertencias de acceso')).toBeTruthy();expect(screen.queryByText('Recurso 6: INACCESSIBLE')).toBeNull()});
+});

@@ -1,3 +1,5 @@
+'use client';
+import {useEffect,useState} from 'react';
 import Link from 'next/link';
 import {
   ActionableInsightCard,
@@ -17,9 +19,9 @@ import {
   generateStrategicMovements,
 } from '@/lib/experience';
 import { OutcomeProgress, PortfolioFlowMap, StrategyCapacityView, StrategyExecutionMap } from '@/components/enterprise/strategy';
-import { LiveExecutiveOverview } from '@/components/jira-live';
+import { LiveExecutiveEmptyState, LiveExecutiveOverview, type LiveUi } from '@/components/jira-live';
 
-export default function Home() {
+function DemoHome() {
   const insights = generateActionableInsights();
   const decisions = generateDecisions();
   const narrative = generateExecutiveNarrative();
@@ -28,7 +30,6 @@ export default function Home() {
 
   return <>
     <ExecutiveGreeting />
-    <LiveExecutiveOverview />
     <ExecutiveNarrative narrative={narrative} insights={insights} />
 
     <NarrativeSection eyebrow="DECISIONES ANTES QUE DASHBOARDS" title="Decisiones que no pueden esperar" description="Ordenadas por impacto, urgencia, fecha límite y confianza de la recomendación." action={<Link className="pill" href="/decisions">Abrir Centro de decisiones →</Link>}>
@@ -71,3 +72,5 @@ export default function Home() {
     </NarrativeSection>
   </>;
 }
+
+export default function Home(){const [live,setLive]=useState<LiveUi|null>(null);useEffect(()=>{fetch('/api/executive/live').then(r=>r.json()).then((value:LiveUi)=>setLive(value)).catch(()=>setLive({data:{dataMode:process.env.NEXT_PUBLIC_DATA_MODE==='LIVE'?'LIVE':'DEMO',available:false}}))},[]);if(!live)return <section className="card panel"><span className="eyebrow purple">VALIDANDO FUENTE DE DATOS</span><h2>Cargando contexto ejecutivo…</h2></section>;if(live.data?.dataMode==='LIVE')return live.data.available?<LiveExecutiveOverview live={live}/>:<LiveExecutiveEmptyState/>;return <DemoHome/>}
