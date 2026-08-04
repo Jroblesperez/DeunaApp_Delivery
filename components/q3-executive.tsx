@@ -1,134 +1,81 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type Status = 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE';
-type Metric = {
-  value: number | null;
-  status: Status;
-  population: number;
-  applicablePopulation: number;
-  coverage: number;
-  confidence: string;
-  evidence: string[];
-  warnings: string[];
-};
-type Metrics = Record<string, Metric>;
-type Overview = {
-  snapshot: { version: number; lastUpdated: string; truncated: boolean; portfolioStatus?: string };
-  commitment: Metrics;
-  delivery: Metrics;
-  progress: Metrics;
-  risk: Metrics;
-  release: Metrics;
-  pulse: Metrics;
-  dataConfidence: Metrics;
-  reconciliation: Record<string, number>;
-};
+type Metric = { value:number|null; status:Status; coverage:number; evidence:string[] };
+type Metrics = Record<string,Metric>;
+type ForecastStatus = 'ON_TRACK'|'WATCH'|'AT_RISK'|'NO_EVIDENCE';
+type Forecast = { displayName:string; reference:string; eco:string|null; initiativeType:string; currentStage:string; featureProgress:{completed:number|null;applicable:number|null;percentage:number|null;status:'SIN_INICIAR'|'EN_CURSO'|'COMPLETADO'|'SIN_EVIDENCIA'}; productionReadiness:{status:'READY'|'PARTIAL'|'NOT_READY'|'NO_EVIDENCE';reason:string}; targetDate:string|null; forecastStatus:ForecastStatus; forecastReason:string; nextGate:string; recommendedAction:string; confidence:string; blocked:boolean };
+type Risk = { type:string; severity:string; affectedInitiativeCount:number; businessImpact:string; suggestedAction:string; requiresExecutiveDecision:string };
+type Eco = { eco:string; committed:number; progress:number|null; risks:number; blocked:number };
+type Overview = { viewer:{greeting:string}; snapshot:{version:number;lastUpdated:string;portfolioStatus?:string}; commitment:Metrics; progress:Metrics; risk:Metrics; release:Metrics; dataConfidence:Metrics; reconciliation:Record<string,number>; attention:Risk[]; ecoHealth:Eco[]; portfolioMix:Array<{type:string;count:number;percentage:number}>; forecast:Forecast[] };
 
-const labels: Record<string, string> = {
-  declared: 'Declaradas', candidates: 'Candidatas / Parking lot', committed: 'Comprometidas vigentes',
-  dateConflicts: 'Conflictos Quarter/fecha', notStarted: 'Sin iniciar', discovery: 'Discovery',
-  inExecution: 'En ejecución', inReview: 'En revisión', inRiskGate: 'Risk Gate', blocked: 'Bloqueadas',
-  administrativelyCompleted: 'Cierre administrativo', productionConfirmed: 'Producción confirmada',
-  required: 'Required', linked: 'Linked', missingReal: 'Missing real', optional: 'Optional',
-  notYetRequired: 'Not yet required', notApplicable: 'Not applicable', unknown: 'Unknown',
-  featureApplicable: 'Feature applicable', featureResolved: 'Resolved', featurePartial: 'Partial',
-  featureUnavailable: 'Unavailable', nonFeatureDelivery: 'Non-feature delivery',
-  requiredNow: 'Required now', requiredLater: 'Required later', withMatrix: 'With matrix',
-  missingMatrix: 'Missing matrix', waitingApproval: 'Waiting approval', evidenced: 'With evidence',
-  coverage: 'Coverage',
-  quarter: 'Quarter', targetDate: 'Fecha objetivo · 4 conflictos', team: 'Team', eco: 'ECO',
-  dspDelivery: 'Delivery required linkage', progress: 'FCR', riskLinkage: 'Risk linkage',
-  release: 'Release', okr: 'OKR Boja', aging: 'Aging',
-};
-const pct = (value: number | null) => value === null ? 'No disponible' : `${value.toLocaleString('es-CO')}%`;
-function MetricCard({ name, metric, percent = false }: { name: string; metric: Metric; percent?: boolean }) {
-  return <article className={`card kpi metric-${metric.status.toLowerCase()}`}>
-    <span>{labels[name] ?? name}</span>
-    <strong>{metric.status === 'UNAVAILABLE' ? 'No disponible' : percent ? pct(metric.value) : metric.value?.toLocaleString('es-CO')}</strong>
-    <small>{metric.status} · población {metric.population} · aplicable {metric.applicablePopulation}</small>
-    <small>Confianza {metric.confidence} · cobertura {metric.coverage.toLocaleString('es-CO')}%</small>
-  </article>;
-}
-function MetricSection({ title, description, metrics, keys, coverageKey = 'coverage' }: {
-  title: string; description: string; metrics: Metrics; keys: string[]; coverageKey?: string;
-}) {
-  return <>
-    <div className="section-title"><div><h2>{title}</h2><p>{description}</p></div></div>
-    <div className="kpi-grid">{keys.map((key) => <MetricCard key={key} name={key} metric={metrics[key]} percent={key === coverageKey} />)}</div>
-  </>;
+const value=(metric?:Metric)=>metric?.value??0;
+const pct=(number:number)=>`${number.toLocaleString('es-CO',{maximumFractionDigits:1})}%`;
+const typeLabel:Record<string,string>={STRATEGIC:'Estratégicas',IMPROVEMENT:'Mejoras',OPERATIONAL:'Operativas',TECH_DEBT:'Deuda técnica'};
+const forecastLabel:Record<ForecastStatus,string>={ON_TRACK:'En trayectoria',WATCH:'Bajo observación',AT_RISK:'En riesgo',NO_EVIDENCE:'Sin evidencia'};
+const executionLabel:Record<Forecast['featureProgress']['status'],string>={SIN_INICIAR:'Sin iniciar',EN_CURSO:'En curso',COMPLETADO:'Completado',SIN_EVIDENCIA:'Sin evidencia'};
+const readinessLabel:Record<Forecast['productionReadiness']['status'],string>={READY:'Lista',PARTIAL:'Parcial',NOT_READY:'No lista',NO_EVIDENCE:'Sin evidencia'};
+const confidenceLabel:Record<string,string>={HIGH:'Confianza alta',MEDIUM:'Confianza media',LOW:'Confianza baja',NONE:'Sin confianza resoluble'};
+const qualityObservation:Record<string,string>={quarter:'Quarter del PI Planning',targetDate:'Fecha objetivo registrada',team:'Equipo responsable resuelto',eco:'ECO organizacional resuelto',delivery:'Vínculo con Delivery resoluble',progress:'Features vinculadas y estados resueltos',risk:'Trazabilidad del Risk Gate',release:'Trazabilidad de Release',okr:'Referencia de alineación con Boja',aging:'Fecha de última actividad disponible'};
+
+function PortfolioMix({items}:{items:Overview['portfolioMix']}){
+  const gradient=items.map((item,index)=>{const start=items.slice(0,index).reduce((sum,x)=>sum+x.percentage,0);return `var(--q3-mix-${index+1}) ${start}% ${start+item.percentage}%`}).join(',');
+  return <article className="q3-kpi q3-mix-kpi" data-testid="portfolio-mix-top"><div><span>Portfolio Mix</span><strong>{items.reduce((sum,x)=>sum+x.count,0)}</strong><small>iniciativas DSP</small></div><div className="mix-donut" style={{background:`conic-gradient(${gradient})`}} aria-label="Distribución del portafolio"/><ul>{items.map((item,index)=><li key={item.type}><i className={`mix-${index+1}`}/><span>{typeLabel[item.type]}</span><b>{item.count} · {pct(item.percentage)}</b></li>)}</ul></article>;
 }
 
-export function Q3ExecutiveOverview() {
-  const [data, setData] = useState<Overview | null | undefined>(undefined);
-  useEffect(() => { fetch('/api/q3/overview').then((r) => r.json()).then((x) => setData(x.data ?? null)).catch(() => setData(null)); }, []);
-  if (data === undefined) return <section className="card panel"><span className="eyebrow purple">Q3 · VALIDANDO EVIDENCIA</span><h2>Construyendo contexto ejecutivo…</h2></section>;
-  if (!data) return <section className="card panel"><span className="eyebrow purple">LIVE DATA · JIRA CLOUD</span><h2>Requiere nuevo snapshot semántico Q3.</h2></section>;
-  if (data.snapshot.portfolioStatus !== 'COMPLETED') return <section className="card panel"><span className="eyebrow purple">Q3 PORTFOLIO · LIVE DATA</span><h2>No fue posible completar el universo DSP Q3.</h2></section>;
+export function Q3ExecutiveOverview(){
+  const [data,setData]=useState<Overview|null|undefined>(undefined);
+  const [filter,setFilter]=useState('En riesgo');
+  const [selected,setSelected]=useState<string|null>(null);
+  const [eco,setEco]=useState('Todos los ECOs');
+  useEffect(()=>{fetch('/api/q3/overview',{credentials:'same-origin'}).then(r=>r.json()).then(x=>setData(x.data??null)).catch(()=>setData(null));},[]);
+  const visibleForecast=useMemo(()=>{
+    if(!data)return[];
+    const scoped=eco==='Todos los ECOs'?data.forecast:data.forecast.filter(x=>x.eco===eco);
+    if(filter==='En riesgo')return scoped.filter(x=>x.forecastStatus==='AT_RISK').slice(0,10);
+    if(filter==='Bloqueadas')return scoped.filter(x=>x.blocked).slice(0,10);
+    if(filter==='Sin iniciar')return scoped.filter(x=>x.featureProgress.status==='SIN_INICIAR').slice(0,10);
+    if(filter==='Próximas')return scoped.filter(x=>x.targetDate&&x.productionReadiness.status!=='NO_EVIDENCE').sort((a,b)=>String(a.targetDate).localeCompare(String(b.targetDate))).slice(0,5);
+    const risks=scoped.filter(x=>x.forecastStatus==='AT_RISK').slice(0,5);
+    const nearest=scoped.filter(x=>x.targetDate&&!risks.includes(x)).sort((a,b)=>String(a.targetDate).localeCompare(String(b.targetDate))).slice(0,5);
+    return [...risks,...nearest];
+  },[data,filter,eco]);
+  if(data===undefined)return <section className="q3-executive card panel"><p>Cargando contexto ejecutivo LIVE…</p></section>;
+  if(!data||data.snapshot.portfolioStatus!=='COMPLETED')return <section className="q3-executive card panel"><h2>Sin evidencia suficiente</h2><p>Se requiere un snapshot LIVE completo del portafolio DSP Q3.</p></section>;
+  const c=data.commitment;
+  const committed=value(c.committed);
+  const snapshotDate=new Date(data.snapshot.lastUpdated);
+  const releaseSufficient=data.release.coverage.status!=='UNAVAILABLE'&&value(data.release.evidenced)>0&&data.release.coverage.coverage>=50;
+  const risks=data.forecast.filter(x=>x.forecastStatus==='AT_RISK');
+  const progress=data.progress.coverage.status==='UNAVAILABLE'?null:data.progress.coverage.value;
+  const health:ForecastStatus=progress===null?'NO_EVIDENCE':risks.length?'AT_RISK':'WATCH';
+  const stages=[['Sin iniciar',value(c.notStarted)+value(c.discovery),'flow-planning'],['En ejecución',value(c.inExecution),'flow-building'],['Revisión',value(c.inReview),'flow-review'],['Risk Gate',value(c.inRiskGate),'flow-risk'],['Release',value(c.administrativelyCompleted),'flow-release'],['Producción',value(c.productionConfirmed),'flow-production-segment']] as const;
+  const bottleneck=stages.reduce((max,item)=>item[1]>max[1]?item:max,stages[0]);
+  const ecoNames=[...new Set(data.ecoHealth.map(x=>x.eco).filter(x=>x!=='UNKNOWN'))];
+  const quality=[['Quarter',data.dataConfidence.quarter,'quarter'],['Fecha objetivo',data.dataConfidence.targetDate,'targetDate'],['Team',data.dataConfidence.team,'team'],['ECO',data.dataConfidence.eco,'eco'],['DSP Delivery',data.dataConfidence.dspDelivery,'delivery'],['FCR',data.dataConfidence.progress,'progress'],['Risk linkage',data.dataConfidence.riskLinkage,'risk'],['Release',data.dataConfidence.release,'release'],['OKR Boja',data.dataConfidence.okr,'okr'],['Aging',data.dataConfidence.aging,'aging']] as const;
+  return <section className="q3-executive">
+    <header className="q3-header-v2"><div><span className="q3-kicker">{data.viewer?.greeting??'Sesión ejecutiva'}</span><h1>Resumen Ejecutivo Q3 2026</h1><p>Compromiso, flujo hacia producción y decisiones prioritarias.</p></div><div className="q3-header-controls"><label>Periodo<select aria-label="Periodo"><option>Q3 2026</option></select></label><label>ECO<select aria-label="ECO" value={eco} onChange={event=>setEco(event.target.value)}><option>Todos los ECOs</option>{ecoNames.map(name=><option key={name}>{name}</option>)}</select></label><div><span>Actualizado</span><b>{snapshotDate.toLocaleString('es-CO')}</b><small>Jira Cloud LIVE · v{data.snapshot.version}</small></div></div></header>
 
-  const c = data.commitment;
-  const committedEquation = ['notStarted','discovery','inExecution','inReview','inRiskGate','blocked','administrativelyCompleted']
-    .map((key) => c[key].value ?? 0).reduce((sum, value) => sum + value, 0);
-  const snapshotDate = new Date(data.snapshot.lastUpdated);
-  const q3Start = new Date('2026-07-01T00:00:00-05:00');
-  const q3End = new Date('2026-09-30T23:59:59-05:00');
-  const daysElapsed = Math.max(0, Math.floor((snapshotDate.getTime() - q3Start.getTime()) / 86400000));
-  const daysRemaining = Math.max(0, Math.ceil((q3End.getTime() - snapshotDate.getTime()) / 86400000));
-  const alerts = [
-    { severity: 'CRITICAL', title: `${c.blocked.value} iniciativas bloqueadas`, body: 'Bloqueo explícito en el estado DSP; requiere decisión de liderazgo.' },
-    { severity: 'HIGH', title: `${data.release.missingReal.value} releases sin evidencia`, body: '10 iniciativas requieren evidencia de release y ninguna tiene trazabilidad disponible.' },
-    { severity: 'HIGH', title: `${data.risk.missingMatrix.value} matrices faltantes · ${data.risk.waitingApproval.value} esperando aprobación`, body: 'Solo sobre la población REQUIRED_NOW; TAREAS POR HACER no se interpreta como bloqueo.' },
-    { severity: 'MEDIUM', title: `${c.dateConflicts.value} conflictos Quarter/fecha`, body: 'Siguen dentro del compromiso Q3 con confianza parcial.' },
-    { severity: 'CONTEXT', title: `${c.notStarted.value} sin iniciar · ${data.reconciliation.chronicCarryOver} carry-over crónico`, body: `${daysElapsed} días transcurridos y ${daysRemaining} días restantes; señal contextual, no crisis automática.` },
-  ];
-  const confidenceMetrics: Metrics = {
-    quarter: data.dataConfidence.quarter,
-    targetDate: data.dataConfidence.targetDate,
-    team: data.dataConfidence.team,
-    eco: data.dataConfidence.eco,
-    dspDelivery: data.delivery.coverage,
-    progress: { ...data.progress.coverage, status: data.progress.featurePartial.value ? 'PARTIAL' : 'AVAILABLE', confidence: data.progress.featurePartial.value ? 'MEDIUM' : 'HIGH' },
-    riskLinkage: { ...data.risk.coverage, status: 'PARTIAL', confidence: 'MEDIUM' },
-    release: { ...data.release.coverage, status: 'PARTIAL', confidence: 'MEDIUM', warnings: ['10 iniciativas REQUIRED sin evidencia de release.'] },
-    okr: data.dataConfidence.okr,
-    aging: data.dataConfidence.aging,
-  };
-
-  return <section className="live-overview">
-    <div className="attention-hero"><div>
-      <span className="eyebrow purple">EXECUTIVE OVERVIEW Q3 · JIRA CLOUD LIVE</span>
-      <h2>Compromiso Q3 reconciliado sobre poblaciones aplicables.</h2>
-      <p>Snapshot LIVE v{data.snapshot.version} · {snapshotDate.toLocaleString('es-CO')} · portafolio DSP completo</p>
-    </div><div className="attention-callout"><span>FUENTE CANÓNICA</span><b>DSP · Jira Cloud LIVE</b></div></div>
-
-    <MetricSection title="Universo Q3" description="Quarter Q3 es la evidencia primaria; la fecha valida consistencia."
-      metrics={c} keys={['declared','candidates','committed','dateConflicts']} coverageKey="" />
-
-    <MetricSection title="Etapas del compromiso" description={`106 = 23 + 0 + 70 + 3 + 7 + 2 + 1 + 0 · reconciliación ${committedEquation === c.committed.value ? 'válida' : 'inválida'}.`}
-      metrics={c} keys={['notStarted','discovery','inExecution','inReview','inRiskGate','blocked','administrativelyCompleted','productionConfirmed']} coverageKey="" />
-
-    <MetricSection title="Delivery applicability" description="Coverage = Linked / Required. Not yet required y Unknown no se reportan como missing."
-      metrics={data.delivery} keys={['required','linked','missingReal','notYetRequired','unknown','coverage']} />
-
-    <MetricSection title="Progress · FCR" description="Coverage = Feature resolved / Feature applicable. Sin Features no equivale a 0%."
-      metrics={data.progress} keys={['featureApplicable','featureResolved','featurePartial','nonFeatureDelivery','coverage']} />
-
-    <MetricSection title="Risk applicability" description="Coverage = With matrix / Required now. UNKNOWN representa incertidumbre, no matriz faltante."
-      metrics={data.risk} keys={['requiredNow','withMatrix','missingMatrix','requiredLater','unknown','waitingApproval','coverage']} />
-
-    <MetricSection title="Release applicability" description="Cierre administrativo no equivale a producción y no determina el forecast."
-      metrics={data.release} keys={['required','evidenced','missingReal','notYetRequired','unknown','coverage']} />
-    <div className="critical-banner">10 iniciativas requieren evidencia de release y ninguna tiene trazabilidad disponible.</div>
-
-    <div className="section-title"><div><h2>Attention Required</h2><p>Cinco señales derivadas de datos LIVE, priorizadas por severidad y decisión requerida.</p></div></div>
-    <div className="actionable-grid">{alerts.map((alert) => <article className="card panel" key={alert.title}>
-      <span className="eyebrow purple">{alert.severity}</span><h3>{alert.title}</h3><p>{alert.body}</p>
-    </article>)}</div>
-
-    <div className="section-title"><div><h2>Data Confidence</h2><p>AVAILABLE, PARTIAL y UNAVAILABLE conservan población, aplicabilidad y cobertura explícitas.</p></div></div>
-    <div className="kpi-grid">
-      {['quarter','targetDate','team','eco','dspDelivery','progress','riskLinkage','release','okr','aging'].map((key) =>
-        <MetricCard key={key} name={key} metric={confidenceMetrics[key]} percent />)}
+    <div className="q3-kpis q3-kpis-v2">
+      <article className="q3-kpi"><span>Salud del compromiso</span><strong className={`signal ${health.toLowerCase()}`}>{forecastLabel[health]}</strong><p>{risks.length} iniciativas requieren intervención.</p><small>{committed} compromisos Q3 vigentes</small></article>
+      <article className="q3-kpi"><span>Avance Q3</span><strong>{value(c.inExecution)} <small>en ejecución</small></strong><div className="q3-progress"><i style={{width:`${committed?value(c.inExecution)/committed*100:0}%`}}/></div><p>{value(c.notStarted)} sin iniciar · {value(c.inReview)} en revisión</p></article>
+      <article className="q3-kpi"><span>Iniciativas en riesgo</span><strong className="risk-number">{risks.length}</strong><p>{value(c.blocked)} bloqueadas · {value(data.risk.missingMatrix)} sin matriz</p><small>Riesgo combina ejecución y readiness.</small></article>
+      <PortfolioMix items={data.portfolioMix}/>
     </div>
+
+    {!releaseSufficient&&<div className="q3-info-strip"><b>Proyección de salida no disponible.</b><span>La cobertura actual de Release no permite identificar próximas a producción.</span></div>}
+
+    <div className="q3-operating-grid">
+      <section className="q3-block eco-health-v2"><div className="q3-title"><div><span>Salud organizacional</span><h2>ECO Health</h2></div></div><div className="eco-compact"><div className="eco-compact-head"><span>ECO</span><span>Compromiso</span><span>Avance</span><span>Riesgo</span><span>Estado</span></div>{data.ecoHealth.slice(0,7).map(item=><div className="eco-compact-row" key={item.eco}><b>{item.eco==='UNKNOWN'?'Sin ECO resoluble':item.eco}</b><span>{item.committed}</span><div>{item.progress===null?<small>Sin evidencia</small>:<><i><em style={{width:`${item.progress}%`}}/></i><small>{pct(item.progress)}</small></>}</div><span>{item.risks||'—'}</span><span className={`eco-dot ${item.blocked?'critical':item.risks?'watch':'healthy'}`}><i/>{item.blocked?'En riesgo':item.risks?'Atención':'Estable'}</span></div>)}</div></section>
+
+      <section className="q3-block flow-production"><div className="q3-title"><div><span>Flujo de valor</span><h2>Flow to Production</h2></div><b>{value(c.blocked)} bloqueadas</b></div><div className="flow-chart" aria-label="Flujo segmentado hacia producción"><div className="flow-track">{stages.map(([label,count,key])=><i className={`${key} ${label===bottleneck[0]?'bottleneck':''}`} key={key} style={{width:`${committed?count/committed*100:0}%`}} title={`${label}: ${count}`}/>)}</div><div className="flow-labels">{stages.map(([label,count,key])=><div key={key}><i className={key}/><b>{count}</b><span>{label}</span><small>{pct(committed?count/committed*100:0)}</small></div>)}</div></div>{bottleneck[0]==='En ejecución'&&!releaseSufficient&&<p className="flow-insight">Actualmente el mayor volumen se concentra en ejecución; la trazabilidad de Release limita la proyección de salida.</p>}<details className="method"><summary>Metodología</summary><p>Etapas reconciliadas según las reglas Q3 vigentes. Las bloqueadas son una señal transversal.</p></details></section>
+
+      <aside className="q3-block attention-side"><div className="q3-title"><div><span>Decisión ejecutiva</span><h2>Atención requerida</h2></div></div>{data.attention.slice(0,4).map((alert,index)=><article key={`${alert.type}-${index}`} className={`attention-compact ${alert.severity.toLowerCase()}`}><div><span>{alert.severity==='CRITICAL'?'Crítica':alert.severity==='HIGH'?'Alta':'Atención'}</span><b>{alert.affectedInitiativeCount} iniciativas</b></div><h3>{alert.businessImpact}</h3><p><b>Acción:</b> {alert.suggestedAction}</p><small>Decide: {alert.requiresExecutiveDecision}</small><button onClick={()=>setFilter('En riesgo')}>Ver detalle →</button></article>)}</aside>
+    </div>
+
+    <section className="q3-block forecast-focus"><div className="q3-title"><div><span>Drill-down principal</span><h2>Forecast de iniciativas</h2><p>Ejecución de Features y readiness de producción se evalúan por separado.</p></div><small>Top de riesgo y proximidad con evidencia</small></div><div className="forecast-filters">{['En riesgo','Bloqueadas','Sin iniciar','Todas',...(releaseSufficient?['Próximas']:[])].map(name=><button className={filter===name?'active':''} onClick={()=>setFilter(name)} key={name}>{name}</button>)}</div><div className="table-wrap forecast-responsive"><table className="forecast-table"><thead><tr><th>Iniciativa</th><th>Estado actual</th><th>Ejecución</th><th>Readiness</th><th>Fecha objetivo</th><th>Riesgo</th><th>Acción</th></tr></thead><tbody>{visibleForecast.map(item=><tr key={item.reference} tabIndex={0} aria-selected={selected===item.reference} onClick={()=>setSelected(item.reference)} className={`${selected===item.reference?'selected ':''}${item.forecastStatus==='AT_RISK'?'critical':''}`}><td data-label="Iniciativa"><strong>{item.displayName}</strong><small>{item.reference} · {item.eco??'ECO sin evidencia'}</small></td><td data-label="Estado actual"><b>{item.currentStage}</b><small>{item.nextGate}</small></td><td data-label="Ejecución"><span className={`execution ${item.featureProgress.status.toLowerCase()}`}>{executionLabel[item.featureProgress.status]}</span><b>{item.featureProgress.percentage===null?'Sin evidencia':`${pct(item.featureProgress.percentage)} Features`}</b>{item.featureProgress.applicable!==null&&<small>{item.featureProgress.completed}/{item.featureProgress.applicable} completadas</small>}</td><td data-label="Readiness"><span className={`readiness ${item.productionReadiness.status.toLowerCase()}`}>{readinessLabel[item.productionReadiness.status]}</span><small>{item.productionReadiness.reason}</small></td><td data-label="Fecha objetivo">{item.targetDate?new Date(item.targetDate).toLocaleDateString('es-CO'):'Sin evidencia'}</td><td data-label="Riesgo"><span className={`forecast-status ${item.forecastStatus.toLowerCase()}`} title={confidenceLabel[item.confidence]}>{forecastLabel[item.forecastStatus]}</span><small>{item.forecastReason}</small></td><td data-label="Acción"><b>{item.recommendedAction}</b></td></tr>)}{!visibleForecast.length&&<tr><td colSpan={7}>No hay iniciativas para este filtro con el scope actual.</td></tr>}</tbody></table></div></section>
+
+    <details id="calidad-datos" className="q3-block data-confidence"><summary><span><b>Calidad y confianza de los datos</b><small>Detalle ejecutivo de cobertura LIVE</small></span><i>Mostrar detalle</i></summary><div className="table-wrap"><table><thead><tr><th>Dimensión</th><th>Estado</th><th>Cobertura</th><th>Observación</th></tr></thead><tbody>{quality.map(([label,metric,key])=><tr key={label}><td><strong>{label}</strong></td><td>{metric?.status==='AVAILABLE'?'Confiable':metric?.status==='PARTIAL'?'Parcial':'Sin evidencia'}</td><td>{pct(metric?.coverage??0)}</td><td>{qualityObservation[key]}</td></tr>)}</tbody></table></div></details>
   </section>;
 }

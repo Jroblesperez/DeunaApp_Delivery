@@ -93,6 +93,8 @@ export interface DeliveryRepresentation {
 }
 export interface Q3Initiative {
   canonicalKey: string;
+  summary: string;
+  targetDate: string | null;
   initiativeType: InitiativeKind;
   quarters: string[];
   sourceStatus: string;
@@ -596,6 +598,8 @@ function buildInitiative(
   const okrs = item.okrReferences;
   return {
     canonicalKey: item.sourceKey,
+    summary: item.summary,
+    targetDate: date,
     initiativeType: kind,
     quarters: item.quarters,
     sourceStatus: item.sourceStatus,
@@ -1509,15 +1513,23 @@ export function buildQ3Overview(
     initiatives,
   };
 }
-export function sanitizeInitiatives(overview: Q3Overview, scope: string) {
+export function sanitizeInitiatives(
+  overview: Q3Overview,
+  scope: string,
+  canViewSummary = false,
+) {
   const allowed =
     scope === 'Organización'
       ? overview.initiatives
       : overview.initiatives.filter(
           (x) => scope === 'Delivery' || x.eco === scope,
         );
-  return allowed.map((x, index) => ({
-    initiativeRef: `DSP-${String(index + 1).padStart(3, '0')}`,
+  return allowed.map((x, index) => {
+    const safeReference = `DSP-${String(index + 1).padStart(3, '0')}`;
+    return {
+    displayName: canViewSummary ? x.summary : safeReference,
+    reference: canViewSummary ? x.canonicalKey : safeReference,
+    targetDate: x.targetDate,
     initiativeType: x.initiativeType,
     quarters: x.quarters,
     sourceStatus: x.sourceStatus,
@@ -1532,5 +1544,118 @@ export function sanitizeInitiatives(overview: Q3Overview, scope: string) {
     linkage: x.linkage,
     riskGate: x.riskGate,
     release: x.release,
-  }));
+    releaseApplicability: x.releaseApplicability,
+    featuresTotal: x.featuresTotal,
+    featuresCompleted: x.featuresCompleted,
+    featuresBlocked: x.featuresBlocked,
+  }});
+}
+
+export type ForecastExecutionStatus =
+  | 'SIN_INICIAR' | 'EN_CURSO' | 'COMPLETADO' | 'SIN_EVIDENCIA';
+export type ProductionReadinessStatus =
+  | 'READY' | 'PARTIAL' | 'NOT_READY' | 'NO_EVIDENCE';
+export type ForecastStatus = 'ON_TRACK' | 'WATCH' | 'AT_RISK' | 'NO_EVIDENCE';
+export interface Q3ForecastDto {
+  displayName: string;
+  reference: string;
+  eco: string | null;
+  initiativeType: InitiativeKind;
+  currentStage: string;
+  featureProgress: {
+    completed: number | null;
+    applicable: number | null;
+    percentage: number | null;
+    status: ForecastExecutionStatus;
+  };
+  productionReadiness: {
+    status: ProductionReadinessStatus;
+    reason: string;
+  };
+  targetDate: string | null;
+  forecastStatus: ForecastStatus;
+  forecastReason: string;
+  nextGate: string;
+  recommendedAction: string;
+  confidence: Confidence;
+  blocked: boolean;
+}
+export function buildForecastDtos(
+  overview: Q3Overview,
+  scope: string,
+  canViewSummary: boolean,
+): Q3ForecastDto[] {
+  const allowed = scope === 'Organización'
+    ? overview.initiatives
+    : overview.initiatives.filter((x) => scope === 'Delivery' || x.eco === scope);
+  return allowed.filter((x) => x.committedQ3).map((x, index) => {
+    const safeReference = `DSP-${String(index + 1).padStart(3, '0')}`;
+    const blocked = x.executiveStage === 'BLOCKED' || x.featuresBlocked > 0;
+    const featureStatus: ForecastExecutionStatus =
+      x.progressStatus === 'UNAVAILABLE' || x.featureCompletionRatio === null
+        ? 'SIN_EVIDENCIA'
+        : x.featureCompletionRatio === 100
+          ? 'COMPLETADO'
+          : x.featureCompletionRatio === 0
+            ? 'SIN_INICIAR'
+            : 'EN_CURSO';
+    const releaseMissing =
+      x.releaseApplicability === 'REQUIRED' && x.release === 'NO_RELEASE_EVIDENCE';
+    const riskMissing =
+      x.riskApplicability === 'REQUIRED_NOW' && x.riskGate === 'UNKNOWN';
+    const readiness: ProductionReadinessStatus = blocked || releaseMissing || riskMissing
+      ? 'NOT_READY'
+      : x.releaseApplicability === 'UNKNOWN' || x.riskApplicability === 'UNKNOWN'
+        ? 'NO_EVIDENCE'
+        : x.release !== 'NO_RELEASE_EVIDENCE' &&
+            ['COMPLETED', 'NOT_REQUIRED'].includes(x.riskGate)
+          ? 'READY'
+          : 'PARTIAL';
+    const readinessReason = blocked
+      ? 'Bloqueo explícito detiene el paso a producción.'
+      : releaseMissing
+        ? 'Release requerido sin evidencia.'
+        : riskMissing
+          ? 'Risk Gate requerido sin trazabilidad.'
+          : readiness === 'NO_EVIDENCE'
+            ? 'Controles de producción sin evidencia suficiente.'
+            : readiness === 'READY'
+              ? 'Risk Gate y Release trazables.'
+              : 'Controles aplicables todavía en preparación.';
+    const forecastStatus: ForecastStatus = readiness === 'NOT_READY'
+      ? 'AT_RISK'
+      : featureStatus === 'SIN_EVIDENCIA' || !x.targetDate || readiness === 'NO_EVIDENCE'
+        ? 'NO_EVIDENCE'
+        : readiness === 'READY' && featureStatus === 'COMPLETADO'
+          ? 'ON_TRACK'
+          : 'WATCH';
+    const nextGate = readiness === 'NOT_READY'
+      ? releaseMissing ? 'Confirmar Release' : blocked ? 'Resolver bloqueo' : 'Completar Risk Gate'
+      : x.release === 'NO_RELEASE_EVIDENCE' ? 'Preparar Release' : 'Validar producción';
+    return {
+      displayName: canViewSummary ? x.summary : safeReference,
+      reference: canViewSummary ? x.canonicalKey : safeReference,
+      eco: x.eco,
+      initiativeType: x.initiativeType,
+      currentStage: x.sourceStatus,
+      featureProgress: {
+        completed: featureStatus === 'SIN_EVIDENCIA' ? null : x.featuresCompleted,
+        applicable: featureStatus === 'SIN_EVIDENCIA' ? null : x.featuresTotal,
+        percentage: x.featureCompletionRatio,
+        status: featureStatus,
+      },
+      productionReadiness: { status: readiness, reason: readinessReason },
+      targetDate: x.targetDate,
+      forecastStatus,
+      forecastReason: readinessReason,
+      nextGate,
+      recommendedAction: forecastStatus === 'AT_RISK'
+        ? nextGate
+        : forecastStatus === 'NO_EVIDENCE'
+          ? 'Completar trazabilidad'
+          : 'Monitorear siguiente gate',
+      confidence: forecastStatus === 'NO_EVIDENCE' ? 'LOW' : readiness === 'READY' ? 'HIGH' : 'MEDIUM',
+      blocked,
+    };
+  });
 }

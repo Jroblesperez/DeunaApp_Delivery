@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeIssue, type SemanticWorkItemV2 } from '@/lib/jira/live';
 import type { SemanticJiraSnapshotRecord } from '@/lib/jira/store';
-import { buildQ3Overview, sanitizeInitiatives } from '@/lib/q3/model';
+import { buildForecastDtos, buildQ3Overview, sanitizeInitiatives } from '@/lib/q3/model';
 import { Q3_CONFIG, Q3_PROFILE_VERSION } from '@/lib/q3/config';
 
 const raw = (
@@ -287,6 +287,35 @@ describe('Deuna canonical Q3 model', () => {
     const x = overview([initiative()]);
     expect(sanitizeInitiatives(x, 'Personas')).toHaveLength(0);
     expect(sanitizeInitiatives(x, 'Organización')).toHaveLength(1);
+  });
+  it('shows summary and real DSP key only to an authorized forecast role', () => {
+    const x = overview([initiative()]);
+    const authorized = buildForecastDtos(x, 'Organización', true)[0];
+    expect(authorized.displayName).toBe('Sensitive DSP-1');
+    expect(authorized.reference).toBe('DSP-1');
+  });
+  it('keeps summary out of a ReadOnly forecast without scope', () => {
+    const x = overview([initiative()]);
+    const restricted = buildForecastDtos(x, 'Consulta', false);
+    expect(restricted).toHaveLength(0);
+    expect(JSON.stringify(restricted)).not.toContain('Sensitive');
+  });
+  it('does not turn 100% feature execution into on-track when Release is missing', () => {
+    const x = overview([initiative()]);
+    Object.assign(x.initiatives[0], {
+      featureCompletionRatio: 100,
+      featuresCompleted: 4,
+      featuresTotal: 4,
+      progressStatus: 'AVAILABLE',
+      releaseApplicability: 'REQUIRED',
+      release: 'NO_RELEASE_EVIDENCE',
+      targetDate: '2026-09-15',
+    });
+    const result = buildForecastDtos(x, 'Organización', true)[0];
+    expect(result.featureProgress).toMatchObject({ percentage: 100, status: 'COMPLETADO' });
+    expect(result.productionReadiness.status).toBe('NOT_READY');
+    expect(result.forecastStatus).toBe('AT_RISK');
+    expect(result.targetDate).toBe('2026-09-15');
   });
   it('derives values from snapshot items rather than external fixtures', () => {
     expect(
