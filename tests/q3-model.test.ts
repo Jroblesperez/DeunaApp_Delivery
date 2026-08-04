@@ -109,7 +109,7 @@ describe('Deuna canonical Q3 model', () => {
     expect(item.resolvedEco.value).toBe('ECO Merchants');
     expect(item.completionDate.value).toBe('2026-09-15');
   });
-  it('commits Q3 initiative only with Quarter, Q3 date and active status', () =>
+  it('commits Q3 initiative from Quarter and active status', () =>
     expect(overview([initiative()]).reconciliation.committedQ3).toBe(1));
   it('classifies Q3 Parking lot as candidate', () =>
     expect(
@@ -125,6 +125,15 @@ describe('Deuna canonical Q3 model', () => {
       overview([initiative('En desarrollo', ['Q3'], '2026-10-15')])
         .reconciliation.quarterDateConflict,
     ).toBe(1));
+  it('keeps a Quarter/date conflict committed with partial confidence', () => {
+    const x = overview([initiative('En desarrollo', ['Q3'], '2026-10-15')]);
+    expect(x.reconciliation.committedQ3).toBe(1);
+    expect(x.initiatives[0]).toMatchObject({
+      quarterConsistency: 'DATE_OUTSIDE_QUARTER',
+      commitmentConfidence: 'MEDIUM',
+      riskSignal: 'DATA_CONFLICT',
+    });
+  });
   it('detects Q3 date without Quarter', () =>
     expect(
       overview([initiative('En desarrollo', [], '2026-09-15')]).reconciliation
@@ -284,5 +293,77 @@ describe('Deuna canonical Q3 model', () => {
       overview([initiative(), { ...initiative(), sourceKey: 'DSP-2' }])
         .reconciliation.declaredQ3,
     ).toBe(2);
+  });
+  it('reconciles declared population into mutually exclusive commitment classes', () => {
+    const items = [
+      initiative('Parking lot'),
+      { ...initiative('No-Go'), sourceKey: 'DSP-2' },
+      { ...initiative('Cancelado'), sourceKey: 'DSP-3' },
+      { ...initiative('En desarrollo'), sourceKey: 'DSP-4' },
+    ];
+    const x = overview(items);
+    expect(x.reconciliation.declaredQ3).toBe(
+      x.reconciliation.candidateQ3 + x.reconciliation.noGoQ3 +
+      x.reconciliation.cancelledQ3 + x.reconciliation.committedQ3,
+    );
+    expect(new Set(x.initiatives.map((item) => item.canonicalKey)).size).toBe(4);
+  });
+  it('reconciles committed population into exactly one DSP stage', () => {
+    const statuses = ['INN PLANNING', 'Discovery', 'En desarrollo', 'Avanzada', 'Revisión', 'Matriz de riesgo', 'Bloqueado', 'Finalizada', 'Extraño'];
+    const x = overview(statuses.map((status, index) => ({ ...initiative(status), sourceKey: `DSP-${index + 1}` })));
+    const stageTotal = ['notStartedStage','discoveryStage','inExecutionStage','inReviewStage','inRiskGateStage','blockedStage','administrativelyCompletedStage','unknownStage']
+      .reduce((sum, key) => sum + x.reconciliation[key], 0);
+    expect(stageTotal).toBe(x.reconciliation.committedQ3);
+    expect(x.commitment.inExecution.value).toBe(2);
+    expect(x.commitment.notStarted.value).toBe(1);
+  });
+  it('does not classify a candidate as committed', () => {
+    const x = overview([initiative('Parking lot')]);
+    expect(x.initiatives[0]).toMatchObject({ candidateQ3: true, committedQ3: false, commitmentStage: null });
+  });
+  it('derives execution from DSP status rather than delivery evidence', () => {
+    const x = overview([polaris(initiative('INN PLANNING'), 'CPD-1'), delivery()]);
+    expect(x.commitment.inExecution.value).toBe(0);
+    expect(x.commitment.notStarted.value).toBe(1);
+  });
+  it('counts delivery missing only inside REQUIRED', () => {
+    const required = { ...initiative('En desarrollo'), initiativeType: undefined };
+    const x = overview([
+      { ...required, sourceKey: 'DSP-1', issueTypeName: 'Deuda Tecnica' },
+      { ...initiative('INN PLANNING'), sourceKey: 'DSP-2' },
+    ]);
+    expect(x.delivery.required.value).toBe(1);
+    expect(x.delivery.missingReal.value).toBe(1);
+    expect(x.delivery.notYetRequired.value).toBe(1);
+  });
+  it('uses FEATURE_BASED as FCR denominator and excludes non-feature delivery', () => {
+    const x = overview([
+      polaris(initiative(), 'CPD-1'), delivery(), feature('F-1', 'Completado'),
+      polaris({ ...initiative(), sourceKey: 'DSP-2' }, 'CPD-2'), delivery('CPD-2'),
+    ]);
+    expect(x.progress.featureApplicable.value).toBe(1);
+    expect(x.progress.featureResolved.value).toBe(1);
+    expect(x.progress.nonFeatureDelivery.value).toBe(1);
+    expect(x.progress.coverage.value).toBe(100);
+  });
+  it('uses REQUIRED_NOW and REQUIRED as risk/release denominators', () => {
+    const matrix = normalizeIssue(raw('R-1', 'CPD', 'Matriz de Riesgos', 'TAREAS POR HACER', { parent: { key: 'CPD-1' } }), 'x');
+    const x = overview([polaris(initiative('Revisión'), 'CPD-1'), delivery(), matrix]);
+    expect(x.risk.requiredNow.value).toBe(1);
+    expect(x.risk.withMatrix.value).toBe(1);
+    expect(x.risk.coverage.value).toBe(100);
+    expect(x.release.required.value).toBe(1);
+    expect(x.release.missingReal.value).toBe(1);
+  });
+  it('keeps unavailable FCR null and administrative completion separate from production', () => {
+    const x = overview([initiative('Finalizada')]);
+    expect(x.pulse.progress.value).toBeNull();
+    expect(x.commitment.administrativelyCompleted.value).toBe(1);
+    expect(x.commitment.productionConfirmed.value).toBe(0);
+  });
+  it('reduces confidence for UNKNOWN applicability', () => {
+    const x = overview([initiative('Revisión')]);
+    expect(x.delivery.unknown.confidence).toBe('MEDIUM');
+    expect(x.delivery.unknown.warnings).not.toHaveLength(0);
   });
 });

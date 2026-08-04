@@ -17,6 +17,11 @@ export async function GET() {
   const safe = {
     snapshot: data.snapshot,
     pulse: data.pulse,
+    commitment: data.commitment,
+    delivery: data.delivery,
+    progress: data.progress,
+    risk: data.risk,
+    release: data.release,
     flow: data.flow,
     attention: data.attention,
     ecoHealth: data.ecoHealth,
