@@ -4,17 +4,46 @@ import { Q3_CONFIG } from './config';
 
 export type MetricStatus = 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE';
 export type CommitmentStage =
-  | 'NOT_STARTED' | 'DISCOVERY' | 'IN_EXECUTION' | 'IN_REVIEW'
-  | 'IN_RISK_GATE' | 'BLOCKED' | 'ADMINISTRATIVELY_COMPLETED' | 'UNKNOWN_STAGE';
+  | 'NOT_STARTED'
+  | 'DISCOVERY'
+  | 'IN_EXECUTION'
+  | 'IN_REVIEW'
+  | 'IN_RISK_GATE'
+  | 'BLOCKED'
+  | 'ADMINISTRATIVELY_COMPLETED'
+  | 'UNKNOWN_STAGE';
 export type DeliveryApplicability =
-  | 'REQUIRED' | 'OPTIONAL' | 'NOT_YET_REQUIRED' | 'NOT_APPLICABLE' | 'UNKNOWN';
+  'REQUIRED' | 'OPTIONAL' | 'NOT_YET_REQUIRED' | 'NOT_APPLICABLE' | 'UNKNOWN';
 export type ProgressApplicability =
-  | 'FEATURE_BASED' | 'NON_FEATURE_DELIVERY' | 'NOT_YET_APPLICABLE'
-  | 'NOT_APPLICABLE' | 'UNKNOWN';
+  | 'FEATURE_BASED'
+  | 'NON_FEATURE_DELIVERY'
+  | 'NOT_YET_APPLICABLE'
+  | 'NOT_APPLICABLE'
+  | 'UNKNOWN';
 export type RiskApplicability =
-  | 'REQUIRED_NOW' | 'REQUIRED_LATER' | 'NOT_REQUIRED' | 'NOT_APPLICABLE' | 'UNKNOWN';
+  | 'REQUIRED_NOW'
+  | 'REQUIRED_LATER'
+  | 'NOT_REQUIRED'
+  | 'NOT_APPLICABLE'
+  | 'UNKNOWN';
 export type ReleaseApplicability =
-  | 'REQUIRED' | 'NOT_YET_REQUIRED' | 'NOT_APPLICABLE' | 'UNKNOWN';
+  'REQUIRED' | 'NOT_YET_REQUIRED' | 'NOT_APPLICABLE' | 'UNKNOWN';
+export type RiskGateStatus =
+  | 'NOT_STARTED'
+  | 'IN_PROGRESS'
+  | 'WAITING_OFFICIAL_APPROVAL'
+  | 'APPROVED'
+  | 'BLOCKED'
+  | 'CANCELLED'
+  | 'UNKNOWN';
+export type PipelineStage =
+  | 'NOT_STARTED'
+  | 'FEATURE_EXECUTION'
+  | 'RISK_GATE'
+  | 'WAITING_OFFICIAL_APPROVAL'
+  | 'RELEASE_READINESS'
+  | 'PRODUCTION'
+  | 'UNKNOWN';
 export interface Q3Metric<T = unknown> {
   value: T | null;
   status: MetricStatus;
@@ -165,9 +194,14 @@ export interface Q3Initiative {
     | 'COMPLETED'
     | 'CANCELLED'
     | 'UNKNOWN';
+  riskGateStatus: RiskGateStatus;
+  riskDomains: { total: number; approved: number; applicable: number };
+  pipelineStage: PipelineStage;
+  blocked: boolean;
   release:
     | 'NO_RELEASE_EVIDENCE'
     | 'RELEASE_PLANNED'
+    | 'RELEASE_APPROVED'
     | 'READY_FOR_RELEASE'
     | 'DEPLOYMENT'
     | 'INTERNAL_TESTING'
@@ -350,6 +384,14 @@ const FEATURE_CANCELLED = new Set([
   'despriorizado',
 ]);
 const FEATURE_BLOCKED = new Set(['bloqueado', 'blocked']);
+const PASS_RISK_STATUS = new Set(['finalizado', 'finalizada', 'aprobado']);
+const RISK_DOMAIN_NAMES = [
+  ['procesos'],
+  ['continuidad del negocio', 'continuidad'],
+  ['datos personales'],
+  ['tecnologia'],
+  ['ciberseguridad y seguridad de la informacion', 'ciberseguridad'],
+] as const;
 const FEATURE_KNOWN = new Set([
   'tareas por hacer',
   'to do',
@@ -386,11 +428,19 @@ const initiativeType = (item: SemanticWorkItemV2) =>
     : null;
 const q3Quarter = (quarters: string[]) => quarters.some((q) => /q3/i.test(q));
 const stage = (status: string) => DSP_STAGES[norm(status)] ?? 'UNKNOWN';
-const commitmentStageOf = (value: ExecutiveStage): CommitmentStage => ({
-  PLANNING: 'NOT_STARTED', DISCOVERY: 'DISCOVERY', BUILDING: 'IN_EXECUTION',
-  PREPARING: 'IN_EXECUTION', REVIEW: 'IN_REVIEW', RISK_GATE: 'IN_RISK_GATE',
-  BLOCKED: 'BLOCKED', COMPLETED_ADMINISTRATIVE: 'ADMINISTRATIVELY_COMPLETED',
-} as Partial<Record<ExecutiveStage, CommitmentStage>>)[value] ?? 'UNKNOWN_STAGE';
+const commitmentStageOf = (value: ExecutiveStage): CommitmentStage =>
+  (
+    ({
+      PLANNING: 'NOT_STARTED',
+      DISCOVERY: 'DISCOVERY',
+      BUILDING: 'IN_EXECUTION',
+      PREPARING: 'IN_EXECUTION',
+      REVIEW: 'IN_REVIEW',
+      RISK_GATE: 'IN_RISK_GATE',
+      BLOCKED: 'BLOCKED',
+      COMPLETED_ADMINISTRATIVE: 'ADMINISTRATIVELY_COMPLETED',
+    }) as Partial<Record<ExecutiveStage, CommitmentStage>>
+  )[value] ?? 'UNKNOWN_STAGE';
 const closeDate = (item: SemanticWorkItemV2) =>
   item.completionDate.value ?? item.dueDate.value ?? null;
 const daysSince = (value: string | null, lastUpdated: string) =>
@@ -404,7 +454,13 @@ const daysSince = (value: string | null, lastUpdated: string) =>
       )
     : null;
 const releaseOf = (items: SemanticWorkItemV2[]): Q3Initiative['release'] => {
-  const statuses = items.map((x) => norm(x.sourceStatus));
+  const releaseItems = items.filter(
+    (x) =>
+      norm(x.issueTypeName) === 'plan release' ||
+      (norm(x.issueTypeName) !== 'feature' &&
+        !['CONTROL_ITEM', 'SUBTASK'].includes(x.hierarchyLevel)),
+  );
+  const statuses = releaseItems.map((x) => norm(x.sourceStatus));
   if (statuses.some((x) => ['produccion', 'published'].includes(x)))
     return 'PRODUCTION';
   if (statuses.some((x) => x.startsWith('masificacion')))
@@ -418,30 +474,127 @@ const releaseOf = (items: SemanticWorkItemV2[]): Q3Initiative['release'] => {
   if (statuses.includes('despliegue')) return 'DEPLOYMENT';
   if (statuses.some((x) => ['bloqueado', 'blocked'].includes(x)))
     return 'RELEASE_BLOCKED';
-  if (
-    items.some(
-      (x) => norm(x.issueTypeName) === 'plan release' || x.fixVersionIds.length,
-    )
-  )
+  const plans = releaseItems.filter(
+    (x) => norm(x.issueTypeName) === 'plan release',
+  );
+  if (plans.some((x) => PASS_RISK_STATUS.has(norm(x.sourceStatus))))
+    return 'RELEASE_APPROVED';
+  if (plans.length || releaseItems.some((x) => x.fixVersionIds.length))
     return 'RELEASE_PLANNED';
   return 'NO_RELEASE_EVIDENCE';
 };
-const riskGateOf = (items: SemanticWorkItemV2[]): Q3Initiative['riskGate'] => {
-  const matrices = items.filter((x) =>
-    ['matriz de riesgos', 'matriz riesgos'].includes(norm(x.issueTypeName)),
+const isRiskMatrix = (item: SemanticWorkItemV2) =>
+  item.issueTypeId.value === '10210' ||
+  ['matriz de riesgos', 'matriz riesgos'].includes(norm(item.issueTypeName));
+const riskDomainIndex = (item: SemanticWorkItemV2) => {
+  const value = norm(item.summary);
+  return RISK_DOMAIN_NAMES.findIndex((aliases) =>
+    aliases.some((alias) => value === alias || value.includes(alias)),
   );
-  if (!matrices.length) return 'UNKNOWN';
+};
+const riskGateOf = (items: SemanticWorkItemV2[]) => {
+  const structuralKeys = new Set(
+    items
+      .filter(
+        (candidate) =>
+          items.filter(
+            (child) =>
+              child.parentKey.value === candidate.sourceKey &&
+              riskDomainIndex(child) >= 0,
+          ).length >= 3,
+      )
+      .map((x) => x.sourceKey),
+  );
+  const matrices = items.filter(
+    (x) => isRiskMatrix(x) || structuralKeys.has(x.sourceKey),
+  );
+  if (!matrices.length)
+    return {
+      legacy: 'UNKNOWN' as const,
+      status: 'UNKNOWN' as RiskGateStatus,
+      domains: { total: 0, approved: 0, applicable: 0 },
+    };
+  const matrixKeys = new Set(matrices.map((x) => x.sourceKey));
+  const domains = items.filter(
+    (x) =>
+      riskDomainIndex(x) >= 0 &&
+      (matrixKeys.has(x.parentKey.value ?? '') ||
+        x.ancestorKeys.some((key) => matrixKeys.has(key))),
+  );
+  const uniqueDomains = [
+    ...new Map(domains.map((x) => [riskDomainIndex(x), x])).values(),
+  ];
+  const approved = uniqueDomains.filter(
+    (x) =>
+      PASS_RISK_STATUS.has(norm(x.sourceStatus)) ||
+      norm(x.sourceStatus) === 'no aplica',
+  );
+  const detail = {
+    total: uniqueDomains.length,
+    approved: approved.length,
+    applicable: uniqueDomains.filter(
+      (x) => norm(x.sourceStatus) !== 'no aplica',
+    ).length,
+  };
   const states = matrices.map((x) => norm(x.sourceStatus));
-  if (states.some((x) => x === 'aprobacion por oficial'))
-    return 'WAITING_APPROVAL';
-  if (states.some((x) => x === 'gestion')) return 'IN_MANAGEMENT';
-  if (states.some((x) => x === 'definicion controles')) return 'IN_DEFINITION';
-  if (states.some((x) => x === 'kickoff')) return 'IN_KICKOFF';
-  if (states.some((x) => x === 'tareas por hacer')) return 'NOT_STARTED';
-  if (states.some((x) => x === 'finalizado')) return 'COMPLETED';
-  if (states.some((x) => ['despriorizado', 'no aplica'].includes(x)))
-    return 'CANCELLED';
-  return 'UNKNOWN';
+  const allStates = [
+    ...states,
+    ...uniqueDomains.map((x) => norm(x.sourceStatus)),
+  ];
+  if (allStates.some((x) => ['bloqueado', 'blocked'].includes(x)))
+    return {
+      legacy: 'IN_MANAGEMENT' as const,
+      status: 'BLOCKED' as RiskGateStatus,
+      domains: detail,
+    };
+  if (states.includes('aprobacion por oficial'))
+    return {
+      legacy: 'WAITING_APPROVAL' as const,
+      status: 'WAITING_OFFICIAL_APPROVAL' as RiskGateStatus,
+      domains: detail,
+    };
+  if (
+    states.some((x) =>
+      [
+        'gestion',
+        'gestion controles',
+        'definicion controles',
+        'kickoff',
+      ].includes(x),
+    )
+  )
+    return {
+      legacy: 'IN_MANAGEMENT' as const,
+      status: 'IN_PROGRESS' as RiskGateStatus,
+      domains: detail,
+    };
+  if (states.includes('tareas por hacer'))
+    return {
+      legacy: 'NOT_STARTED' as const,
+      status: 'NOT_STARTED' as RiskGateStatus,
+      domains: detail,
+    };
+  if (states.includes('despriorizado'))
+    return {
+      legacy: 'CANCELLED' as const,
+      status: 'CANCELLED' as RiskGateStatus,
+      domains: detail,
+    };
+  if (
+    states.every((x) => PASS_RISK_STATUS.has(x)) &&
+    uniqueDomains.length === 5 &&
+    approved.length === 5
+  )
+    return {
+      legacy: 'COMPLETED' as const,
+      status: 'APPROVED' as RiskGateStatus,
+      domains: detail,
+    };
+  return {
+    legacy: 'UNKNOWN' as const,
+    status: 'UNKNOWN' as RiskGateStatus,
+    domains: detail,
+  };
 };
 function consolidated(
   dsp: ExecutiveStage,
@@ -468,6 +621,21 @@ function consolidated(
   if (dsp === 'BLOCKED') return 'BUILDING';
   return 'UNKNOWN';
 }
+function pipelineStageOf(
+  featureRatio: number | null,
+  riskGate: RiskGateStatus,
+  release: Q3Initiative['release'],
+): PipelineStage {
+  if (release === 'PRODUCTION') return 'PRODUCTION';
+  if (featureRatio !== null && featureRatio < 100)
+    return featureRatio === 0 ? 'NOT_STARTED' : 'FEATURE_EXECUTION';
+  if (riskGate === 'WAITING_OFFICIAL_APPROVAL')
+    return 'WAITING_OFFICIAL_APPROVAL';
+  if (['NOT_STARTED', 'IN_PROGRESS', 'BLOCKED'].includes(riskGate))
+    return 'RISK_GATE';
+  if (riskGate === 'APPROVED') return 'RELEASE_READINESS';
+  return featureRatio === 100 ? 'UNKNOWN' : 'NOT_STARTED';
+}
 function linkedItems(
   initiative: SemanticWorkItemV2,
   items: SemanticWorkItemV2[],
@@ -482,11 +650,24 @@ function linkedItems(
     .map((link) => byKey.get(link.key))
     .filter((x): x is SemanticWorkItemV2 => Boolean(x));
   const parentKeys = new Set(parents.map((x) => x.sourceKey));
+  const relatedKeys = new Set(parentKeys);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidate of items) {
+      if (relatedKeys.has(candidate.sourceKey)) continue;
+      if (
+        relatedKeys.has(candidate.parentKey.value ?? '') ||
+        candidate.ancestorKeys.some((key) => relatedKeys.has(key)) ||
+        candidate.issueLinks.some((link) => relatedKeys.has(link.key))
+      ) {
+        relatedKeys.add(candidate.sourceKey);
+        changed = true;
+      }
+    }
+  }
   const related = items.filter(
-    (x) =>
-      parentKeys.has(x.parentKey.value ?? '') ||
-      x.ancestorKeys.some((k) => parentKeys.has(k)) ||
-      parents.some((p) => x.issueLinks.some((l) => l.key === p.sourceKey)),
+    (x) => relatedKeys.has(x.sourceKey) && !parentKeys.has(x.sourceKey),
   );
   return { links, parents, related };
 }
@@ -538,7 +719,8 @@ function buildInitiative(
     ? Math.round((completed / denominator) * 10000) / 100
     : null;
   const release = releaseOf([...parents, ...related]);
-  const riskGate = riskGateOf(related);
+  const riskGateEvidence = riskGateOf(related);
+  const riskGate = riskGateEvidence.legacy;
   const consolidatedStage = consolidated(
     executiveStage,
     release,
@@ -546,12 +728,27 @@ function buildInitiative(
     features,
   );
   const production = release === 'PRODUCTION';
+  const blockedEvidence =
+    executiveStage === 'BLOCKED' ||
+    related.some(
+      (x) =>
+        x.flagged.value === true ||
+        FEATURE_BLOCKED.has(norm(x.sourceStatus)) ||
+        Boolean(x.blockedReason.value),
+    );
   const committedStage = committed ? commitmentStageOf(executiveStage) : null;
   const early = executiveStage === 'PLANNING' || executiveStage === 'DISCOVERY';
   const hasDelivery = links.length > 0;
   const technologyEvidence =
     hasDelivery || features.length > 0 || kind === 'TECH_DEBT';
-  const advanced = ['BUILDING', 'PREPARING', 'REVIEW', 'RISK_GATE', 'BLOCKED', 'COMPLETED_ADMINISTRATIVE'].includes(executiveStage);
+  const advanced = [
+    'BUILDING',
+    'PREPARING',
+    'REVIEW',
+    'RISK_GATE',
+    'BLOCKED',
+    'COMPLETED_ADMINISTRATIVE',
+  ].includes(executiveStage);
   const deliveryApplicability: DeliveryApplicability = hasDelivery
     ? 'REQUIRED'
     : early && !technologyEvidence
@@ -566,19 +763,28 @@ function buildInitiative(
       : hasDelivery
         ? 'NON_FEATURE_DELIVERY'
         : 'UNKNOWN';
-  const riskApplicability: RiskApplicability = riskGate !== 'UNKNOWN'
-    ? riskGate === 'CANCELLED' ? 'NOT_REQUIRED' : 'REQUIRED_NOW'
-    : early
-      ? 'REQUIRED_LATER'
-      : ['RISK_GATE', 'REVIEW', 'COMPLETED_ADMINISTRATIVE'].includes(executiveStage) && technologyEvidence
-        ? 'REQUIRED_NOW'
+  const riskApplicability: RiskApplicability =
+    riskGate !== 'UNKNOWN'
+      ? riskGate === 'CANCELLED'
+        ? 'NOT_REQUIRED'
+        : 'REQUIRED_NOW'
+      : early
+        ? 'REQUIRED_LATER'
+        : ['RISK_GATE', 'REVIEW', 'COMPLETED_ADMINISTRATIVE'].includes(
+              executiveStage,
+            ) && technologyEvidence
+          ? 'REQUIRED_NOW'
+          : 'UNKNOWN';
+  const releaseApplicability: ReleaseApplicability =
+    production ||
+    (['REVIEW', 'RISK_GATE', 'COMPLETED_ADMINISTRATIVE'].includes(
+      executiveStage,
+    ) &&
+      technologyEvidence)
+      ? 'REQUIRED'
+      : early || executiveStage === 'BUILDING'
+        ? 'NOT_YET_REQUIRED'
         : 'UNKNOWN';
-  const releaseApplicability: ReleaseApplicability = production ||
-    ['REVIEW', 'RISK_GATE', 'COMPLETED_ADMINISTRATIVE'].includes(executiveStage) && technologyEvidence
-    ? 'REQUIRED'
-    : early || executiveStage === 'BUILDING'
-      ? 'NOT_YET_REQUIRED'
-      : 'UNKNOWN';
   const stageConflicts: string[] = [];
   if (executiveStage === 'COMPLETED_ADMINISTRATIVE' && !production)
     stageConflicts.push('Cierre administrativo sin evidencia de producción.');
@@ -633,7 +839,11 @@ function buildInitiative(
     cancelledQ3: cancelled,
     committedQ3: committed,
     commitmentStage: committedStage,
-    quarterConsistency: !date ? 'DATE_MISSING' : dateQ3 ? 'CONSISTENT' : 'DATE_OUTSIDE_QUARTER',
+    quarterConsistency: !date
+      ? 'DATE_MISSING'
+      : dateQ3
+        ? 'CONSISTENT'
+        : 'DATE_OUTSIDE_QUARTER',
     commitmentConfidence: date && !dateQ3 ? 'MEDIUM' : 'HIGH',
     riskSignal: date && !dateQ3 ? 'DATA_CONFLICT' : null,
     quarterDateConfirmed: dateQ3,
@@ -652,11 +862,14 @@ function buildInitiative(
     deliveryApplicabilityEvidence: hasDelivery
       ? ['Polaris delivery parent presente.']
       : early
-        ? ['Estado DSP previo al inicio de ejecución; sin evidencia tecnológica iniciada.']
+        ? [
+            'Estado DSP previo al inicio de ejecución; sin evidencia tecnológica iniciada.',
+          ]
         : technologyEvidence
           ? ['Estado DSP de ejecución y evidencia tecnológica explícita.']
           : ['Evidencia insuficiente; no se infiere por ECO ni por nombre.'],
-    deliveryApplicabilityConfidence: deliveryApplicability === 'UNKNOWN' ? 'LOW' : 'HIGH',
+    deliveryApplicabilityConfidence:
+      deliveryApplicability === 'UNKNOWN' ? 'LOW' : 'HIGH',
     progressApplicability,
     riskApplicability,
     releaseApplicability,
@@ -719,6 +932,10 @@ function buildInitiative(
           ? 'ALIGNED_REFERENCE'
           : 'NO_REFERENCE',
     riskGate,
+    riskGateStatus: riskGateEvidence.status,
+    riskDomains: riskGateEvidence.domains,
+    pipelineStage: pipelineStageOf(ratio, riskGateEvidence.status, release),
+    blocked: blockedEvidence,
     release,
   };
 }
@@ -767,7 +984,9 @@ function buildRisks(
       ),
     );
   const noDelivery = committed.filter(
-    (x) => x.deliveryApplicability === 'REQUIRED' && x.linkage === 'NO_DELIVERY_LINK',
+    (x) =>
+      x.deliveryApplicability === 'REQUIRED' &&
+      x.linkage === 'NO_DELIVERY_LINK',
   );
   if (noDelivery.length)
     out.push(
@@ -877,8 +1096,12 @@ export function buildQ3Overview(
   const declared = initiatives.filter((x) => x.declaredQ3);
   const committed = initiatives.filter((x) => x.committedQ3);
   const risks = buildRisks(initiatives, byKey, snapshot.completedAt);
-  const progressEligible = committed.filter((x) => x.progressApplicability === 'FEATURE_BASED');
-  const progressResolved = progressEligible.filter((x) => x.progressStatus === 'AVAILABLE');
+  const progressEligible = committed.filter(
+    (x) => x.progressApplicability === 'FEATURE_BASED',
+  );
+  const progressResolved = progressEligible.filter(
+    (x) => x.progressStatus === 'AVAILABLE',
+  );
   const progressCoverage = progressEligible.length
     ? progressResolved.length / progressEligible.length
     : 0;
@@ -886,8 +1109,12 @@ export function buildQ3Overview(
   const administrative = committed.filter(
     (x) => x.administrativelyCompleted && !x.productionConfirmed,
   );
-  const executing = committed.filter((x) => x.commitmentStage === 'IN_EXECUTION');
-  const notStarted = committed.filter((x) => x.commitmentStage === 'NOT_STARTED');
+  const executing = committed.filter(
+    (x) => x.commitmentStage === 'IN_EXECUTION',
+  );
+  const notStarted = committed.filter(
+    (x) => x.commitmentStage === 'NOT_STARTED',
+  );
   const blocked = committed.filter(
     (x) => x.executiveStage === 'BLOCKED' || x.featuresBlocked > 0,
   );
@@ -926,7 +1153,9 @@ export function buildQ3Overview(
       initiatives.length,
       declared.length,
       commitmentCoverage,
-      ['DSP canónico + Quarter Q3 + exclusiones explícitas; fecha valida consistencia.'],
+      [
+        'DSP canónico + Quarter Q3 + exclusiones explícitas; fecha valida consistencia.',
+      ],
     ),
     candidates: metric(
       snapshot,
@@ -1031,32 +1260,20 @@ export function buildQ3Overview(
         : [],
     ),
   };
-  const flowNames: Record<ConsolidatedStage, string> = {
-    NO_GO: 'Completed',
-    CANCELLED: 'Completed',
-    PRODUCTION_CONFIRMED: 'Production',
-    MASSIFICATION: 'Massification',
-    INTERNAL_TESTING: 'Review',
-    DEPLOYMENT: 'Deployment',
-    READY_FOR_RELEASE: 'Ready',
-    WAITING_RISK_APPROVAL: 'Risk Gate',
-    RISK_IN_PROGRESS: 'Risk Gate',
-    QA: 'Review',
-    READY_FOR_QA: 'Review',
-    BUILDING: 'Building',
-    DISCOVERY: 'Exploring',
-    PLANNING: 'Planning',
-    CANDIDATE: 'Planning',
-    UNKNOWN: 'Preparing',
+  const flowNames: Record<PipelineStage, string> = {
+    NOT_STARTED: 'Sin iniciar',
+    FEATURE_EXECUTION: 'Ejecución',
+    RISK_GATE: 'Risk Gate',
+    WAITING_OFFICIAL_APPROVAL: 'Aprobación',
+    RELEASE_READINESS: 'Release',
+    PRODUCTION: 'Producción',
+    UNKNOWN: 'Sin evidencia',
   };
-  const flowStage = (item: Q3Initiative) =>
-    item.executiveStage === 'BLOCKED' || item.featuresBlocked > 0
-      ? 'Blocked'
-      : flowNames[item.consolidatedStage];
+  const flowStage = (item: Q3Initiative) => flowNames[item.pipelineStage];
   const flow = (
     commitmentStatus === 'UNAVAILABLE'
       ? []
-      : [...new Set([...Object.values(flowNames), 'Blocked'])]
+      : [...new Set(Object.values(flowNames))]
   ).map((name) => {
     const count = committed.filter((x) => flowStage(x) === name).length;
     return {
@@ -1066,7 +1283,9 @@ export function buildQ3Overview(
         ? Math.round((count / committed.length) * 10000) / 100
         : 0,
       coverage: 100,
-      attention: ['Blocked', 'Risk Gate'].includes(name) && count > 0,
+      attention:
+        ['Risk Gate', 'Aprobación', 'Sin evidencia'].includes(name) &&
+        count > 0,
     };
   });
   const ecoNames =
@@ -1302,79 +1521,268 @@ export function buildQ3Overview(
     value: number,
     applicablePopulation: number,
     evidence: string[],
-    coverage = applicablePopulation ? Math.round((value / applicablePopulation) * 10000) / 100 : 0,
+    coverage = applicablePopulation
+      ? Math.round((value / applicablePopulation) * 10000) / 100
+      : 0,
     warnings: string[] = [],
-  ) => metric(snapshot, value, commitmentStatus, declared.length, applicablePopulation, coverage, evidence, warnings);
+  ) =>
+    metric(
+      snapshot,
+      value,
+      commitmentStatus,
+      declared.length,
+      applicablePopulation,
+      coverage,
+      evidence,
+      warnings,
+    );
   const unknownMetric = (value: number, evidence: string[]) =>
-    metric(snapshot, value, value ? 'PARTIAL' : commitmentStatus, declared.length, committed.length,
-      committed.length ? Math.round((value / committed.length) * 10000) / 100 : 0,
-      evidence, value ? ['UNKNOWN reduce la confianza hasta resolver evidencia.'] : []);
+    metric(
+      snapshot,
+      value,
+      value ? 'PARTIAL' : commitmentStatus,
+      declared.length,
+      committed.length,
+      committed.length
+        ? Math.round((value / committed.length) * 10000) / 100
+        : 0,
+      evidence,
+      value ? ['UNKNOWN reduce la confianza hasta resolver evidencia.'] : [],
+    );
   const candidates = declared.filter((x) => x.candidateQ3);
   const noGo = declared.filter((x) => x.noGoQ3);
   const cancelled = declared.filter((x) => x.cancelledQ3);
-  const stageCount = (stage: CommitmentStage) => committed.filter((x) => x.commitmentStage === stage).length;
-  const deliveryRequired = committed.filter((x) => x.deliveryApplicability === 'REQUIRED');
-  const deliveryLinked = deliveryRequired.filter((x) => x.deliveryRepresentations.length > 0);
-  const deliveryMissing = deliveryRequired.filter((x) => x.deliveryRepresentations.length === 0);
-  const deliveryCoverageValue = deliveryRequired.length ? Math.round((deliveryLinked.length / deliveryRequired.length) * 10000) / 100 : 0;
-  const riskRequiredNow = committed.filter((x) => x.riskApplicability === 'REQUIRED_NOW');
-  const riskWithMatrix = riskRequiredNow.filter((x) => x.riskGate !== 'UNKNOWN');
-  const riskCoverageValue = riskRequiredNow.length ? Math.round((riskWithMatrix.length / riskRequiredNow.length) * 10000) / 100 : 0;
-  const releaseRequired = committed.filter((x) => x.releaseApplicability === 'REQUIRED');
-  const releaseEvidenced = releaseRequired.filter((x) => x.release !== 'NO_RELEASE_EVIDENCE');
-  const releaseCoverageValue = releaseRequired.length ? Math.round((releaseEvidenced.length / releaseRequired.length) * 10000) / 100 : 0;
+  const stageCount = (stage: CommitmentStage) =>
+    committed.filter((x) => x.commitmentStage === stage).length;
+  const deliveryRequired = committed.filter(
+    (x) => x.deliveryApplicability === 'REQUIRED',
+  );
+  const deliveryLinked = deliveryRequired.filter(
+    (x) => x.deliveryRepresentations.length > 0,
+  );
+  const deliveryMissing = deliveryRequired.filter(
+    (x) => x.deliveryRepresentations.length === 0,
+  );
+  const deliveryCoverageValue = deliveryRequired.length
+    ? Math.round((deliveryLinked.length / deliveryRequired.length) * 10000) /
+      100
+    : 0;
+  const riskRequiredNow = committed.filter(
+    (x) => x.riskApplicability === 'REQUIRED_NOW',
+  );
+  const riskWithMatrix = riskRequiredNow.filter(
+    (x) => x.riskGate !== 'UNKNOWN',
+  );
+  const riskCoverageValue = riskRequiredNow.length
+    ? Math.round((riskWithMatrix.length / riskRequiredNow.length) * 10000) / 100
+    : 0;
+  const releaseRequired = committed.filter(
+    (x) => x.releaseApplicability === 'REQUIRED',
+  );
+  const releaseEvidenced = releaseRequired.filter(
+    (x) => x.release !== 'NO_RELEASE_EVIDENCE',
+  );
+  const releaseCoverageValue = releaseRequired.length
+    ? Math.round((releaseEvidenced.length / releaseRequired.length) * 10000) /
+      100
+    : 0;
   const commitmentMetrics: Record<string, Q3Metric<number>> = {
-    declared: countMetric(declared.length, declared.length, ['DSP canónico con Quarters Q3.']),
-    candidates: countMetric(candidates.length, declared.length, ['Parking lot.']),
-    committed: countMetric(committed.length, declared.length, ['Quarter Q3 menos exclusiones explícitas.']),
+    declared: countMetric(declared.length, declared.length, [
+      'DSP canónico con Quarters Q3.',
+    ]),
+    candidates: countMetric(candidates.length, declared.length, [
+      'Parking lot.',
+    ]),
+    committed: countMetric(committed.length, declared.length, [
+      'Quarter Q3 menos exclusiones explícitas.',
+    ]),
     noGo: countMetric(noGo.length, declared.length, ['No-Go explícito.']),
-    cancelled: countMetric(cancelled.length, declared.length, ['Cancelación explícita.']),
-    dateConflicts: countMetric(committed.filter((x) => x.quarterDateConflict).length, committed.length, ['Fecha fuera de Q3 no elimina compromiso.']),
-    notStarted: countMetric(stageCount('NOT_STARTED'), committed.length, ['Estado DSP INN PLANNING.']),
-    discovery: countMetric(stageCount('DISCOVERY'), committed.length, ['Estado DSP Discovery.']),
-    inExecution: countMetric(stageCount('IN_EXECUTION'), committed.length, ['Estados DSP En desarrollo y Avanzada.']),
-    inReview: countMetric(stageCount('IN_REVIEW'), committed.length, ['Estado DSP Revisión.']),
-    inRiskGate: countMetric(stageCount('IN_RISK_GATE'), committed.length, ['Estado DSP Matriz de riesgo.']),
-    blocked: countMetric(stageCount('BLOCKED'), committed.length, ['Estado DSP Bloqueado.']),
-    administrativelyCompleted: countMetric(stageCount('ADMINISTRATIVELY_COMPLETED'), committed.length, ['Estado DSP Finalizada.']),
-    productionConfirmed: countMetric(delivered.length, committed.length, ['Evidencia real de producción.']),
+    cancelled: countMetric(cancelled.length, declared.length, [
+      'Cancelación explícita.',
+    ]),
+    dateConflicts: countMetric(
+      committed.filter((x) => x.quarterDateConflict).length,
+      committed.length,
+      ['Fecha fuera de Q3 no elimina compromiso.'],
+    ),
+    notStarted: countMetric(stageCount('NOT_STARTED'), committed.length, [
+      'Estado DSP INN PLANNING.',
+    ]),
+    discovery: countMetric(stageCount('DISCOVERY'), committed.length, [
+      'Estado DSP Discovery.',
+    ]),
+    inExecution: countMetric(stageCount('IN_EXECUTION'), committed.length, [
+      'Estados DSP En desarrollo y Avanzada.',
+    ]),
+    inReview: countMetric(stageCount('IN_REVIEW'), committed.length, [
+      'Estado DSP Revisión.',
+    ]),
+    inRiskGate: countMetric(stageCount('IN_RISK_GATE'), committed.length, [
+      'Estado DSP Matriz de riesgo.',
+    ]),
+    blocked: countMetric(stageCount('BLOCKED'), committed.length, [
+      'Estado DSP Bloqueado.',
+    ]),
+    administrativelyCompleted: countMetric(
+      stageCount('ADMINISTRATIVELY_COMPLETED'),
+      committed.length,
+      ['Estado DSP Finalizada.'],
+    ),
+    productionConfirmed: countMetric(delivered.length, committed.length, [
+      'Evidencia real de producción.',
+    ]),
   };
   const deliveryMetrics: Record<string, Q3Metric<number>> = {
-    required: countMetric(deliveryRequired.length, committed.length, ['Aplicabilidad REQUIRED.']),
-    linked: countMetric(deliveryLinked.length, deliveryRequired.length, ['REQUIRED con Polaris.'], deliveryCoverageValue),
-    missingReal: countMetric(deliveryMissing.length, deliveryRequired.length, ['REQUIRED sin Polaris.']),
-    optional: countMetric(committed.filter((x) => x.deliveryApplicability === 'OPTIONAL').length, committed.length, ['Modelo alternativo explícito.']),
-    notYetRequired: countMetric(committed.filter((x) => x.deliveryApplicability === 'NOT_YET_REQUIRED').length, committed.length, ['Planning/Discovery sin ejecución iniciada.']),
-    notApplicable: countMetric(committed.filter((x) => x.deliveryApplicability === 'NOT_APPLICABLE').length, committed.length, ['No aplica explícito.']),
-    unknown: unknownMetric(committed.filter((x) => x.deliveryApplicability === 'UNKNOWN').length, ['Evidencia insuficiente.']),
-    coverage: countMetric(deliveryCoverageValue, deliveryRequired.length, ['REQUIRED con link / REQUIRED.'], deliveryCoverageValue),
+    required: countMetric(deliveryRequired.length, committed.length, [
+      'Aplicabilidad REQUIRED.',
+    ]),
+    linked: countMetric(
+      deliveryLinked.length,
+      deliveryRequired.length,
+      ['REQUIRED con Polaris.'],
+      deliveryCoverageValue,
+    ),
+    missingReal: countMetric(deliveryMissing.length, deliveryRequired.length, [
+      'REQUIRED sin Polaris.',
+    ]),
+    optional: countMetric(
+      committed.filter((x) => x.deliveryApplicability === 'OPTIONAL').length,
+      committed.length,
+      ['Modelo alternativo explícito.'],
+    ),
+    notYetRequired: countMetric(
+      committed.filter((x) => x.deliveryApplicability === 'NOT_YET_REQUIRED')
+        .length,
+      committed.length,
+      ['Planning/Discovery sin ejecución iniciada.'],
+    ),
+    notApplicable: countMetric(
+      committed.filter((x) => x.deliveryApplicability === 'NOT_APPLICABLE')
+        .length,
+      committed.length,
+      ['No aplica explícito.'],
+    ),
+    unknown: unknownMetric(
+      committed.filter((x) => x.deliveryApplicability === 'UNKNOWN').length,
+      ['Evidencia insuficiente.'],
+    ),
+    coverage: countMetric(
+      deliveryCoverageValue,
+      deliveryRequired.length,
+      ['REQUIRED con link / REQUIRED.'],
+      deliveryCoverageValue,
+    ),
   };
   const progressMetrics: Record<string, Q3Metric<number>> = {
-    featureApplicable: countMetric(progressEligible.length, committed.length, ['FEATURE_BASED.']),
-    featureResolved: countMetric(progressResolved.length, progressEligible.length, ['Features con estados mapeados.'], Math.round(progressCoverage * 10000) / 100),
-    featurePartial: countMetric(progressEligible.filter((x) => x.progressStatus === 'PARTIAL').length, progressEligible.length, ['Alguna Feature no mapeada.']),
-    featureUnavailable: countMetric(progressEligible.filter((x) => x.progressStatus === 'UNAVAILABLE').length, progressEligible.length, ['Población Feature sin FCR resoluble.']),
-    nonFeatureDelivery: countMetric(committed.filter((x) => x.progressApplicability === 'NON_FEATURE_DELIVERY').length, committed.length, ['Delivery no basado en Features.']),
-    coverage: countMetric(Math.round(progressCoverage * 10000) / 100, progressEligible.length, ['FEATURE_RESOLVED / FEATURE_BASED.'], Math.round(progressCoverage * 10000) / 100),
+    featureApplicable: countMetric(progressEligible.length, committed.length, [
+      'FEATURE_BASED.',
+    ]),
+    featureResolved: countMetric(
+      progressResolved.length,
+      progressEligible.length,
+      ['Features con estados mapeados.'],
+      Math.round(progressCoverage * 10000) / 100,
+    ),
+    featurePartial: countMetric(
+      progressEligible.filter((x) => x.progressStatus === 'PARTIAL').length,
+      progressEligible.length,
+      ['Alguna Feature no mapeada.'],
+    ),
+    featureUnavailable: countMetric(
+      progressEligible.filter((x) => x.progressStatus === 'UNAVAILABLE').length,
+      progressEligible.length,
+      ['Población Feature sin FCR resoluble.'],
+    ),
+    nonFeatureDelivery: countMetric(
+      committed.filter(
+        (x) => x.progressApplicability === 'NON_FEATURE_DELIVERY',
+      ).length,
+      committed.length,
+      ['Delivery no basado en Features.'],
+    ),
+    coverage: countMetric(
+      Math.round(progressCoverage * 10000) / 100,
+      progressEligible.length,
+      ['FEATURE_RESOLVED / FEATURE_BASED.'],
+      Math.round(progressCoverage * 10000) / 100,
+    ),
   };
   const riskMetrics: Record<string, Q3Metric<number>> = {
-    requiredNow: countMetric(riskRequiredNow.length, committed.length, ['Aplicabilidad REQUIRED_NOW.']),
-    requiredLater: countMetric(committed.filter((x) => x.riskApplicability === 'REQUIRED_LATER').length, committed.length, ['Planning/Discovery.']),
-    withMatrix: countMetric(riskWithMatrix.length, riskRequiredNow.length, ['REQUIRED_NOW con matriz.'], riskCoverageValue),
-    missingMatrix: countMetric(riskRequiredNow.length - riskWithMatrix.length, riskRequiredNow.length, ['REQUIRED_NOW sin matriz.']),
-    waitingApproval: countMetric(committed.filter((x) => x.riskGate === 'WAITING_APPROVAL').length, riskRequiredNow.length, ['Matriz esperando aprobación.']),
-    unknown: unknownMetric(committed.filter((x) => x.riskApplicability === 'UNKNOWN').length, ['Evidencia insuficiente.']),
-    coverage: countMetric(riskCoverageValue, riskRequiredNow.length, ['Con matriz / REQUIRED_NOW.'], riskCoverageValue),
+    requiredNow: countMetric(riskRequiredNow.length, committed.length, [
+      'Aplicabilidad REQUIRED_NOW.',
+    ]),
+    requiredLater: countMetric(
+      committed.filter((x) => x.riskApplicability === 'REQUIRED_LATER').length,
+      committed.length,
+      ['Planning/Discovery.'],
+    ),
+    withMatrix: countMetric(
+      riskWithMatrix.length,
+      riskRequiredNow.length,
+      ['REQUIRED_NOW con matriz.'],
+      riskCoverageValue,
+    ),
+    missingMatrix: countMetric(
+      riskRequiredNow.length - riskWithMatrix.length,
+      riskRequiredNow.length,
+      ['REQUIRED_NOW sin matriz.'],
+    ),
+    waitingApproval: countMetric(
+      committed.filter((x) => x.riskGate === 'WAITING_APPROVAL').length,
+      riskRequiredNow.length,
+      ['Matriz esperando aprobación.'],
+    ),
+    unknown: unknownMetric(
+      committed.filter((x) => x.riskApplicability === 'UNKNOWN').length,
+      ['Evidencia insuficiente.'],
+    ),
+    coverage: countMetric(
+      riskCoverageValue,
+      riskRequiredNow.length,
+      ['Con matriz / REQUIRED_NOW.'],
+      riskCoverageValue,
+    ),
   };
   const releaseMetrics: Record<string, Q3Metric<number>> = {
-    required: countMetric(releaseRequired.length, committed.length, ['Aplicabilidad REQUIRED.']),
-    evidenced: countMetric(releaseEvidenced.length, releaseRequired.length, ['REQUIRED con evidencia release.'], releaseCoverageValue),
-    missingReal: countMetric(releaseRequired.length - releaseEvidenced.length, releaseRequired.length, ['REQUIRED sin evidencia.']),
-    notYetRequired: countMetric(committed.filter((x) => x.releaseApplicability === 'NOT_YET_REQUIRED').length, committed.length, ['Etapa temprana.']),
-    notApplicable: countMetric(committed.filter((x) => x.releaseApplicability === 'NOT_APPLICABLE').length, committed.length, ['No aplica explícito.']),
-    unknown: unknownMetric(committed.filter((x) => x.releaseApplicability === 'UNKNOWN').length, ['Evidencia insuficiente.']),
-    productionConfirmed: countMetric(delivered.length, releaseRequired.length, ['Producción real confirmada.']),
-    coverage: countMetric(releaseCoverageValue, releaseRequired.length, ['Evidenciada / REQUIRED.'], releaseCoverageValue),
+    required: countMetric(releaseRequired.length, committed.length, [
+      'Aplicabilidad REQUIRED.',
+    ]),
+    evidenced: countMetric(
+      releaseEvidenced.length,
+      releaseRequired.length,
+      ['REQUIRED con evidencia release.'],
+      releaseCoverageValue,
+    ),
+    missingReal: countMetric(
+      releaseRequired.length - releaseEvidenced.length,
+      releaseRequired.length,
+      ['REQUIRED sin evidencia.'],
+    ),
+    notYetRequired: countMetric(
+      committed.filter((x) => x.releaseApplicability === 'NOT_YET_REQUIRED')
+        .length,
+      committed.length,
+      ['Etapa temprana.'],
+    ),
+    notApplicable: countMetric(
+      committed.filter((x) => x.releaseApplicability === 'NOT_APPLICABLE')
+        .length,
+      committed.length,
+      ['No aplica explícito.'],
+    ),
+    unknown: unknownMetric(
+      committed.filter((x) => x.releaseApplicability === 'UNKNOWN').length,
+      ['Evidencia insuficiente.'],
+    ),
+    productionConfirmed: countMetric(delivered.length, releaseRequired.length, [
+      'Producción real confirmada.',
+    ]),
+    coverage: countMetric(
+      releaseCoverageValue,
+      releaseRequired.length,
+      ['Evidenciada / REQUIRED.'],
+      releaseCoverageValue,
+    ),
   };
   return {
     snapshot: {
@@ -1477,6 +1885,7 @@ export function buildQ3Overview(
         [
           'NO_RELEASE_EVIDENCE',
           'RELEASE_PLANNED',
+          'RELEASE_APPROVED',
           'READY_FOR_RELEASE',
           'DEPLOYMENT',
           'INTERNAL_TESTING',
@@ -1527,34 +1936,39 @@ export function sanitizeInitiatives(
   return allowed.map((x, index) => {
     const safeReference = `DSP-${String(index + 1).padStart(3, '0')}`;
     return {
-    displayName: canViewSummary ? x.summary : safeReference,
-    reference: canViewSummary ? x.canonicalKey : safeReference,
-    targetDate: x.targetDate,
-    initiativeType: x.initiativeType,
-    quarters: x.quarters,
-    sourceStatus: x.sourceStatus,
-    executiveStage: x.executiveStage,
-    completionOutcome: x.completionOutcome,
-    committedQ3: x.committedQ3,
-    featureCompletionRatio: x.featureCompletionRatio,
-    progressStatus: x.progressStatus,
-    consolidatedStage: x.consolidatedStage,
-    carryOver: x.carryOver,
-    eco: x.eco,
-    linkage: x.linkage,
-    riskGate: x.riskGate,
-    release: x.release,
-    releaseApplicability: x.releaseApplicability,
-    featuresTotal: x.featuresTotal,
-    featuresCompleted: x.featuresCompleted,
-    featuresBlocked: x.featuresBlocked,
-  }});
+      displayName: canViewSummary ? x.summary : safeReference,
+      reference: canViewSummary ? x.canonicalKey : safeReference,
+      targetDate: x.targetDate,
+      initiativeType: x.initiativeType,
+      quarters: x.quarters,
+      sourceStatus: x.sourceStatus,
+      executiveStage: x.executiveStage,
+      completionOutcome: x.completionOutcome,
+      committedQ3: x.committedQ3,
+      featureCompletionRatio: x.featureCompletionRatio,
+      progressStatus: x.progressStatus,
+      consolidatedStage: x.consolidatedStage,
+      carryOver: x.carryOver,
+      eco: x.eco,
+      linkage: x.linkage,
+      riskGate: x.riskGate,
+      riskGateStatus: x.riskGateStatus,
+      riskDomains: x.riskDomains,
+      pipelineStage: x.pipelineStage,
+      blocked: x.blocked,
+      release: x.release,
+      releaseApplicability: x.releaseApplicability,
+      featuresTotal: x.featuresTotal,
+      featuresCompleted: x.featuresCompleted,
+      featuresBlocked: x.featuresBlocked,
+    };
+  });
 }
 
 export type ForecastExecutionStatus =
-  | 'SIN_INICIAR' | 'EN_CURSO' | 'COMPLETADO' | 'SIN_EVIDENCIA';
+  'SIN_INICIAR' | 'EN_CURSO' | 'COMPLETADO' | 'SIN_EVIDENCIA';
 export type ProductionReadinessStatus =
-  | 'READY' | 'PARTIAL' | 'NOT_READY' | 'NO_EVIDENCE';
+  'READY' | 'PARTIAL' | 'NOT_READY' | 'NO_EVIDENCE';
 export type ForecastStatus = 'ON_TRACK' | 'WATCH' | 'AT_RISK' | 'NO_EVIDENCE';
 export interface Q3ForecastDto {
   displayName: string;
@@ -1562,6 +1976,7 @@ export interface Q3ForecastDto {
   eco: string | null;
   initiativeType: InitiativeKind;
   currentStage: string;
+  stage: PipelineStage;
   featureProgress: {
     completed: number | null;
     applicable: number | null;
@@ -1572,6 +1987,7 @@ export interface Q3ForecastDto {
     status: ProductionReadinessStatus;
     reason: string;
   };
+  gateReadiness: { label: string; detail: string };
   targetDate: string | null;
   forecastStatus: ForecastStatus;
   forecastReason: string;
@@ -1580,82 +1996,176 @@ export interface Q3ForecastDto {
   confidence: Confidence;
   blocked: boolean;
 }
+const currentGateLabel = (stage: PipelineStage, risk: RiskGateStatus) => {
+  if (stage === 'FEATURE_EXECUTION') {
+    if (risk === 'IN_PROGRESS') return 'Risk Gate en paralelo';
+    if (risk === 'WAITING_OFFICIAL_APPROVAL')
+      return 'Aprobación oficial pendiente';
+    if (risk === 'APPROVED') return 'Risk Gate aprobado';
+    if (risk === 'BLOCKED') return 'Risk Gate bloqueado';
+    return 'Sin evidencia de Risk Gate';
+  }
+  if (stage === 'RISK_GATE')
+    return risk === 'NOT_STARTED'
+      ? 'Risk Gate sin iniciar'
+      : risk === 'BLOCKED'
+        ? 'Risk Gate bloqueado'
+        : 'Risk Gate en curso';
+  if (stage === 'WAITING_OFFICIAL_APPROVAL')
+    return 'Aprobación oficial pendiente';
+  if (stage === 'RELEASE_READINESS') return 'Readiness de Release';
+  if (stage === 'PRODUCTION') return 'En producción';
+  return stage === 'NOT_STARTED' ? 'Sin iniciar' : 'Sin evidencia';
+};
 export function buildForecastDtos(
   overview: Q3Overview,
   scope: string,
   canViewSummary: boolean,
 ): Q3ForecastDto[] {
-  const allowed = scope === 'Organización'
-    ? overview.initiatives
-    : overview.initiatives.filter((x) => scope === 'Delivery' || x.eco === scope);
-  return allowed.filter((x) => x.committedQ3).map((x, index) => {
-    const safeReference = `DSP-${String(index + 1).padStart(3, '0')}`;
-    const blocked = x.executiveStage === 'BLOCKED' || x.featuresBlocked > 0;
-    const featureStatus: ForecastExecutionStatus =
-      x.progressStatus === 'UNAVAILABLE' || x.featureCompletionRatio === null
-        ? 'SIN_EVIDENCIA'
-        : x.featureCompletionRatio === 100
-          ? 'COMPLETADO'
-          : x.featureCompletionRatio === 0
-            ? 'SIN_INICIAR'
-            : 'EN_CURSO';
-    const releaseMissing =
-      x.releaseApplicability === 'REQUIRED' && x.release === 'NO_RELEASE_EVIDENCE';
-    const riskMissing =
-      x.riskApplicability === 'REQUIRED_NOW' && x.riskGate === 'UNKNOWN';
-    const readiness: ProductionReadinessStatus = blocked || releaseMissing || riskMissing
-      ? 'NOT_READY'
-      : x.releaseApplicability === 'UNKNOWN' || x.riskApplicability === 'UNKNOWN'
-        ? 'NO_EVIDENCE'
-        : x.release !== 'NO_RELEASE_EVIDENCE' &&
-            ['COMPLETED', 'NOT_REQUIRED'].includes(x.riskGate)
+  const allowed =
+    scope === 'Organización'
+      ? overview.initiatives
+      : overview.initiatives.filter(
+          (x) => scope === 'Delivery' || x.eco === scope,
+        );
+  return allowed
+    .filter((x) => x.committedQ3)
+    .map((x, index) => {
+      const safeReference = `DSP-${String(index + 1).padStart(3, '0')}`;
+      const blocked = x.blocked;
+      const featureStatus: ForecastExecutionStatus =
+        x.progressStatus === 'UNAVAILABLE' || x.featureCompletionRatio === null
+          ? 'SIN_EVIDENCIA'
+          : x.featureCompletionRatio === 100
+            ? 'COMPLETADO'
+            : x.featureCompletionRatio === 0
+              ? 'SIN_INICIAR'
+              : 'EN_CURSO';
+      const stage = pipelineStageOf(
+        x.featureCompletionRatio,
+        x.riskGateStatus,
+        x.release,
+      );
+      const releaseApproved = x.release === 'RELEASE_APPROVED';
+      const readiness: ProductionReadinessStatus =
+        stage === 'PRODUCTION'
           ? 'READY'
-          : 'PARTIAL';
-    const readinessReason = blocked
-      ? 'Bloqueo explícito detiene el paso a producción.'
-      : releaseMissing
-        ? 'Release requerido sin evidencia.'
-        : riskMissing
-          ? 'Risk Gate requerido sin trazabilidad.'
-          : readiness === 'NO_EVIDENCE'
-            ? 'Controles de producción sin evidencia suficiente.'
+          : ['RISK_GATE', 'WAITING_OFFICIAL_APPROVAL'].includes(stage) ||
+              blocked
+            ? 'NOT_READY'
+            : stage === 'UNKNOWN'
+              ? 'NO_EVIDENCE'
+              : 'PARTIAL';
+      const domainDetail = x.riskDomains.total
+        ? `${x.riskDomains.approved}/${x.riskDomains.total} dominios aprobados`
+        : 'Sin evidencia suficiente de dominios';
+      const readinessReason =
+        stage === 'FEATURE_EXECUTION'
+          ? x.riskGateStatus === 'IN_PROGRESS'
+            ? 'Desarrollo en curso · Risk Gate en paralelo.'
+            : x.riskGateStatus === 'WAITING_OFFICIAL_APPROVAL'
+              ? 'Desarrollo en curso · Aprobación oficial pendiente.'
+              : x.riskGateStatus === 'APPROVED'
+                ? 'Desarrollo en curso · Risk Gate aprobado.'
+                : x.riskGateStatus === 'BLOCKED'
+                  ? 'Desarrollo en curso · Risk Gate bloqueado.'
+                  : 'Desarrollo en curso · Sin evidencia de Risk Gate.'
+          : stage === 'RISK_GATE'
+            ? `Risk Gate en curso · ${domainDetail}.`
+            : stage === 'WAITING_OFFICIAL_APPROVAL'
+              ? `Pendiente aprobación oficial · ${domainDetail}.`
+              : stage === 'RELEASE_READINESS'
+                ? releaseApproved
+                  ? 'Release aprobado · pendiente evidencia de producción.'
+                  : 'Risk Gate aprobado; Release aún no aprobado.'
+                : stage === 'PRODUCTION'
+                  ? 'Producción confirmada con evidencia positiva.'
+                  : 'No existe evidencia suficiente para ubicar el siguiente gate.';
+      const forecastStatus: ForecastStatus =
+        blocked || ['RISK_GATE', 'WAITING_OFFICIAL_APPROVAL'].includes(stage)
+          ? 'AT_RISK'
+          : featureStatus === 'SIN_EVIDENCIA' ||
+              !x.targetDate ||
+              stage === 'UNKNOWN'
+            ? 'NO_EVIDENCE'
+            : stage === 'PRODUCTION'
+              ? 'ON_TRACK'
+              : 'WATCH';
+      const nextGate =
+        stage === 'FEATURE_EXECUTION'
+          ? 'Completar desarrollo'
+          : stage === 'RISK_GATE'
+            ? 'Completar Risk Gate'
+            : stage === 'WAITING_OFFICIAL_APPROVAL'
+              ? 'Aprobación oficial'
+              : stage === 'RELEASE_READINESS'
+                ? releaseApproved
+                  ? 'Evidencia de producción'
+                  : 'Release'
+                : stage === 'PRODUCTION'
+                  ? 'Producción confirmada'
+                  : 'Completar trazabilidad';
+      const recommendedAction = blocked
+        ? stage === 'RISK_GATE'
+          ? 'Resolver bloqueo y completar Risk Gate'
+          : 'Resolver bloqueo'
+        : stage === 'FEATURE_EXECUTION'
+          ? x.riskGateStatus === 'WAITING_OFFICIAL_APPROVAL'
+            ? 'Completar Features · monitorear aprobación oficial'
+            : 'Completar Features'
+          : stage === 'RISK_GATE'
+            ? 'Completar Risk Gate'
+            : stage === 'WAITING_OFFICIAL_APPROVAL'
+              ? 'Esperar aprobación oficial'
+              : stage === 'RELEASE_READINESS'
+                ? releaseApproved
+                  ? 'Pendiente evidencia de producción'
+                  : 'Preparar Release'
+                : stage === 'PRODUCTION'
+                  ? 'Monitorear producción'
+                  : 'Completar trazabilidad';
+      return {
+        displayName: canViewSummary ? x.summary : safeReference,
+        reference: canViewSummary ? x.canonicalKey : safeReference,
+        eco: x.eco,
+        initiativeType: x.initiativeType,
+        currentStage: (
+          {
+            NOT_STARTED: 'Sin iniciar',
+            FEATURE_EXECUTION: 'Ejecución',
+            RISK_GATE: 'Risk Gate',
+            WAITING_OFFICIAL_APPROVAL: 'Aprobación oficial',
+            RELEASE_READINESS: 'Release',
+            PRODUCTION: 'Producción',
+            UNKNOWN: 'Sin evidencia',
+          } as Record<PipelineStage, string>
+        )[stage],
+        stage,
+        featureProgress: {
+          completed:
+            featureStatus === 'SIN_EVIDENCIA' ? null : x.featuresCompleted,
+          applicable:
+            featureStatus === 'SIN_EVIDENCIA' ? null : x.featuresTotal,
+          percentage: x.featureCompletionRatio,
+          status: featureStatus,
+        },
+        productionReadiness: { status: readiness, reason: readinessReason },
+        gateReadiness: {
+          label: currentGateLabel(stage, x.riskGateStatus),
+          detail: readinessReason,
+        },
+        targetDate: x.targetDate,
+        forecastStatus,
+        forecastReason: readinessReason,
+        nextGate,
+        recommendedAction,
+        confidence:
+          forecastStatus === 'NO_EVIDENCE'
+            ? 'LOW'
             : readiness === 'READY'
-              ? 'Risk Gate y Release trazables.'
-              : 'Controles aplicables todavía en preparación.';
-    const forecastStatus: ForecastStatus = readiness === 'NOT_READY'
-      ? 'AT_RISK'
-      : featureStatus === 'SIN_EVIDENCIA' || !x.targetDate || readiness === 'NO_EVIDENCE'
-        ? 'NO_EVIDENCE'
-        : readiness === 'READY' && featureStatus === 'COMPLETADO'
-          ? 'ON_TRACK'
-          : 'WATCH';
-    const nextGate = readiness === 'NOT_READY'
-      ? releaseMissing ? 'Confirmar Release' : blocked ? 'Resolver bloqueo' : 'Completar Risk Gate'
-      : x.release === 'NO_RELEASE_EVIDENCE' ? 'Preparar Release' : 'Validar producción';
-    return {
-      displayName: canViewSummary ? x.summary : safeReference,
-      reference: canViewSummary ? x.canonicalKey : safeReference,
-      eco: x.eco,
-      initiativeType: x.initiativeType,
-      currentStage: x.sourceStatus,
-      featureProgress: {
-        completed: featureStatus === 'SIN_EVIDENCIA' ? null : x.featuresCompleted,
-        applicable: featureStatus === 'SIN_EVIDENCIA' ? null : x.featuresTotal,
-        percentage: x.featureCompletionRatio,
-        status: featureStatus,
-      },
-      productionReadiness: { status: readiness, reason: readinessReason },
-      targetDate: x.targetDate,
-      forecastStatus,
-      forecastReason: readinessReason,
-      nextGate,
-      recommendedAction: forecastStatus === 'AT_RISK'
-        ? nextGate
-        : forecastStatus === 'NO_EVIDENCE'
-          ? 'Completar trazabilidad'
-          : 'Monitorear siguiente gate',
-      confidence: forecastStatus === 'NO_EVIDENCE' ? 'LOW' : readiness === 'READY' ? 'HIGH' : 'MEDIUM',
-      blocked,
-    };
-  });
+              ? 'HIGH'
+              : 'MEDIUM',
+        blocked,
+      };
+    });
 }

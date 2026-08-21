@@ -1,30 +1,398 @@
 // @vitest-environment jsdom
 import React from 'react';
-import {afterEach,describe,expect,it,vi} from 'vitest';
-import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import Home from '@/app/page';
 import IntegrationPage from '@/app/admin/integrations/page';
-import {DataModeBanner} from '@/components/shell';
-import {JiraIntegrationPanel,JiraSyncPanel,type LiveUi} from '@/components/jira-live';
+import { DataModeBanner } from '@/components/shell';
+import {
+  JiraIntegrationPanel,
+  JiraSyncPanel,
+  type LiveUi,
+} from '@/components/jira-live';
 
-const metric=(value:unknown,status:'AVAILABLE'|'PARTIAL'|'UNAVAILABLE'='AVAILABLE')=>({value,status,coverage:100,population:110,applicablePopulation:110,confidence:status==='AVAILABLE'?'HIGH':'MEDIUM',evidence:['test'],warnings:[]});
-const metrics={snapshotContext:{projectsAccessible:metric(5),issuesProcessed:metric(500),snapshotVersion:metric(3),syncMode:metric('FULL')},dataConfidence:{hierarchyCoverage:metric(60,'PARTIAL')},q3Activity:{activeInQ3:metric(20,'PARTIAL')},flowDistribution:{DEVELOPMENT:metric(16,'PARTIAL')},unavailable:{cycleTime:metric(null,'UNAVAILABLE')}};
-const live:LiveUi={data:{dataMode:'LIVE',available:true,semanticAvailable:true,schemaVersion:2,source:'Jira Cloud',lastSync:'2026-08-03T13:38:47.128Z',coverage:100,status:'PARTIAL',metrics,dataQuality:[]}};
-const q3={data:{viewer:{greeting:'Hola, Joan'},snapshot:{version:10,lastUpdated:'2026-08-04T18:28:46.887Z',truncated:true,portfolioStatus:'COMPLETED'},pulse:{carryOver:metric(19)},commitment:{declared:metric(110),candidates:metric(4),committed:metric(106),dateConflicts:metric(4),notStarted:metric(23),discovery:metric(0),inExecution:metric(70),inReview:metric(3),inRiskGate:metric(7),blocked:metric(2),administrativelyCompleted:metric(1),productionConfirmed:metric(0)},delivery:{required:metric(65),linked:metric(65),missingReal:metric(0),notYetRequired:metric(11),unknown:metric(30,'PARTIAL'),coverage:metric(100)},progress:{featureApplicable:metric(37),featureResolved:metric(34),featurePartial:metric(3,'PARTIAL'),nonFeatureDelivery:metric(22),coverage:metric(91.89,'PARTIAL')},risk:{requiredNow:metric(39),withMatrix:metric(37),missingMatrix:metric(2),requiredLater:metric(17),unknown:metric(50,'PARTIAL'),waitingApproval:metric(1),coverage:metric(94.87,'PARTIAL')},release:{required:metric(10),evidenced:metric(0),missingReal:metric(10),notYetRequired:metric(80),unknown:metric(16,'PARTIAL'),coverage:metric(0,'PARTIAL')},reconciliation:{chronicCarryOver:1},dataConfidence:{quarter:metric(100),targetDate:metric(100),team:metric(100),eco:metric(100),okr:metric(null,'UNAVAILABLE'),aging:metric(null,'UNAVAILABLE')},attention:[{type:'EXPLICITLY_BLOCKED',severity:'CRITICAL',affectedInitiativeCount:2,evidence:['Bloqueo explícito.'],businessImpact:'Valor comprometido detenido.',suggestedAction:'Resolver impedimento.',requiresExecutiveDecision:'Líder ECO'}],ecoHealth:[{eco:'Payments',committed:10,executing:7,notStarted:2,delivered:0,blocked:1,progress:50,risks:1,confidence:'MEDIUM'}],portfolioMix:[{type:'STRATEGIC',count:40,percentage:37.74},{type:'IMPROVEMENT',count:30,percentage:28.3},{type:'OPERATIONAL',count:26,percentage:24.53},{type:'TECH_DEBT',count:10,percentage:9.43}],forecast:[{displayName:'Cobros recurrentes',reference:'DSP-42',eco:'Payments',initiativeType:'STRATEGIC',currentStage:'En desarrollo',featureProgress:{completed:4,applicable:4,percentage:100,status:'COMPLETADO'},productionReadiness:{status:'NOT_READY',reason:'Release requerido sin evidencia.'},targetDate:'2026-09-15',forecastStatus:'AT_RISK',forecastReason:'Release requerido sin evidencia.',nextGate:'Confirmar Release',recommendedAction:'Confirmar Release',confidence:'MEDIUM',blocked:false}]}};
-const response=(body:unknown)=>Promise.resolve({json:()=>Promise.resolve(body)}) as Promise<Response>;
+const metric = (
+  value: unknown,
+  status: 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE' = 'AVAILABLE',
+) => ({
+  value,
+  status,
+  coverage: 100,
+  population: 110,
+  applicablePopulation: 110,
+  confidence: status === 'AVAILABLE' ? 'HIGH' : 'MEDIUM',
+  evidence: ['test'],
+  warnings: [],
+});
+const metrics = {
+  snapshotContext: {
+    projectsAccessible: metric(5),
+    issuesProcessed: metric(500),
+    snapshotVersion: metric(3),
+    syncMode: metric('FULL'),
+  },
+  dataConfidence: { hierarchyCoverage: metric(60, 'PARTIAL') },
+  q3Activity: { activeInQ3: metric(20, 'PARTIAL') },
+  flowDistribution: { DEVELOPMENT: metric(16, 'PARTIAL') },
+  unavailable: { cycleTime: metric(null, 'UNAVAILABLE') },
+};
+const live: LiveUi = {
+  data: {
+    dataMode: 'LIVE',
+    available: true,
+    semanticAvailable: true,
+    schemaVersion: 2,
+    source: 'Jira Cloud',
+    lastSync: '2026-08-03T13:38:47.128Z',
+    coverage: 100,
+    status: 'PARTIAL',
+    metrics,
+    dataQuality: [],
+  },
+};
+const q3 = {
+  data: {
+    viewer: { greeting: 'Hola, Joan' },
+    snapshot: {
+      version: 10,
+      lastUpdated: '2026-08-04T18:28:46.887Z',
+      truncated: true,
+      portfolioStatus: 'COMPLETED',
+    },
+    pulse: { carryOver: metric(19) },
+    commitment: {
+      declared: metric(110),
+      candidates: metric(4),
+      committed: metric(106),
+      dateConflicts: metric(4),
+      notStarted: metric(23),
+      discovery: metric(0),
+      inExecution: metric(70),
+      inReview: metric(3),
+      inRiskGate: metric(7),
+      blocked: metric(2),
+      administrativelyCompleted: metric(1),
+      productionConfirmed: metric(0),
+    },
+    delivery: {
+      required: metric(65),
+      linked: metric(65),
+      missingReal: metric(0),
+      notYetRequired: metric(11),
+      unknown: metric(30, 'PARTIAL'),
+      coverage: metric(100),
+    },
+    progress: {
+      featureApplicable: metric(37),
+      featureResolved: metric(34),
+      featurePartial: metric(3, 'PARTIAL'),
+      nonFeatureDelivery: metric(22),
+      coverage: metric(91.89, 'PARTIAL'),
+    },
+    risk: {
+      requiredNow: metric(39),
+      withMatrix: metric(37),
+      missingMatrix: metric(2),
+      requiredLater: metric(17),
+      unknown: metric(50, 'PARTIAL'),
+      waitingApproval: metric(1),
+      coverage: metric(94.87, 'PARTIAL'),
+    },
+    release: {
+      required: metric(10),
+      evidenced: metric(0),
+      missingReal: metric(10),
+      notYetRequired: metric(80),
+      unknown: metric(16, 'PARTIAL'),
+      coverage: metric(0, 'PARTIAL'),
+    },
+    reconciliation: { chronicCarryOver: 1 },
+    dataConfidence: {
+      quarter: metric(100),
+      targetDate: metric(100),
+      team: metric(100),
+      eco: metric(100),
+      okr: metric(null, 'UNAVAILABLE'),
+      aging: metric(null, 'UNAVAILABLE'),
+    },
+    attention: [
+      {
+        type: 'EXPLICITLY_BLOCKED',
+        severity: 'CRITICAL',
+        affectedInitiativeCount: 2,
+        evidence: ['Bloqueo explícito.'],
+        businessImpact: 'Valor comprometido detenido.',
+        suggestedAction: 'Resolver impedimento.',
+        requiresExecutiveDecision: 'Líder ECO',
+      },
+    ],
+    ecoHealth: [
+      {
+        eco: 'Payments',
+        committed: 10,
+        executing: 7,
+        notStarted: 2,
+        delivered: 0,
+        blocked: 1,
+        progress: 50,
+        risks: 1,
+        confidence: 'MEDIUM',
+      },
+    ],
+    portfolioMix: [
+      { type: 'STRATEGIC', count: 40, percentage: 37.74 },
+      { type: 'IMPROVEMENT', count: 30, percentage: 28.3 },
+      { type: 'OPERATIONAL', count: 26, percentage: 24.53 },
+      { type: 'TECH_DEBT', count: 10, percentage: 9.43 },
+    ],
+    flow: [
+      { stage: 'Sin iniciar', initiatives: 23, percentage: 21.7 },
+      { stage: 'Ejecución', initiatives: 70, percentage: 66 },
+      { stage: 'Risk Gate', initiatives: 7, percentage: 6.6 },
+      { stage: 'Aprobación', initiatives: 1, percentage: 0.9 },
+      { stage: 'Release', initiatives: 5, percentage: 4.7 },
+      { stage: 'Producción', initiatives: 0, percentage: 0 },
+    ],
+    forecast: [
+      {
+        displayName: 'Cobros recurrentes',
+        reference: 'DSP-42',
+        eco: 'Payments',
+        initiativeType: 'STRATEGIC',
+        currentStage: 'Risk Gate',
+        stage: 'RISK_GATE',
+        featureProgress: {
+          completed: 4,
+          applicable: 4,
+          percentage: 100,
+          status: 'COMPLETADO',
+        },
+        productionReadiness: {
+          status: 'NOT_READY',
+          reason: 'Risk Gate en curso · 0/5 dominios aprobados.',
+        },
+        gateReadiness: {
+          label: 'Risk Gate en curso',
+          detail: 'Risk Gate en curso · 0/5 dominios aprobados.',
+        },
+        targetDate: '2026-09-15',
+        forecastStatus: 'AT_RISK',
+        forecastReason: 'Risk Gate en curso · 0/5 dominios aprobados.',
+        nextGate: 'Completar Risk Gate',
+        recommendedAction: 'Completar Risk Gate',
+        confidence: 'MEDIUM',
+        blocked: false,
+      },
+    ],
+  },
+};
+const response = (body: unknown) =>
+  Promise.resolve({ json: () => Promise.resolve(body) }) as Promise<Response>;
 
-afterEach(()=>{cleanup();vi.restoreAllMocks()});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
-describe('LIVE presentation boundaries',()=>{
-  it('renders the executive Q3 experience with four KPIs and collapsed confidence',async()=>{vi.stubGlobal('fetch',vi.fn((url)=>response(String(url).includes('/api/q3/overview')?q3:live)));const {container}=render(<Home/>);await screen.findByText('Resumen Ejecutivo Q3 2026');expect(container.querySelectorAll('.q3-kpi')).toHaveLength(4);expect(screen.queryByText('AVAILABLE')).toBeNull();expect(screen.queryByText(/población aplicable/i)).toBeNull();expect(container.querySelector('.data-confidence')?.hasAttribute('open')).toBe(false);expect(screen.queryByText('Decisiones que no pueden esperar')).toBeNull()});
-  it('separates feature execution from production readiness',async()=>{vi.stubGlobal('fetch',vi.fn((url)=>response(String(url).includes('/api/q3/overview')?q3:live)));const {container}=render(<Home/>);await screen.findByText('Forecast de iniciativas');expect(screen.getByText('Cobros recurrentes')).toBeTruthy();expect(screen.getByText(/DSP-42/)).toBeTruthy();expect(screen.getByText('100% Features')).toBeTruthy();expect(screen.getByText('No lista')).toBeTruthy();expect(screen.getAllByText('En riesgo').length).toBeGreaterThan(0);expect(screen.queryByRole('button',{name:'Próximas'})).toBeNull();expect(container.querySelectorAll('.forecast-table tbody tr').length).toBeLessThanOrEqual(10)});
-  it('keeps portfolio mix in the top KPI row and flow as one chart',async()=>{vi.stubGlobal('fetch',vi.fn((url)=>response(String(url).includes('/api/q3/overview')?q3:live)));const {container}=render(<Home/>);await screen.findByText('Flow to Production');expect(container.querySelector('[data-testid="portfolio-mix-top"]')?.parentElement?.classList.contains('q3-kpis')).toBe(true);expect(container.querySelectorAll('.flow-track')).toHaveLength(1);expect(container.querySelectorAll('.flow-track > i')).toHaveLength(6);expect(container.querySelectorAll('.attention-compact').length).toBeLessThanOrEqual(4)});
-  it('uses distinct selected and critical forecast row states',async()=>{vi.stubGlobal('fetch',vi.fn((url)=>response(String(url).includes('/api/q3/overview')?q3:live)));const {container}=render(<Home/>);await screen.findByText('Cobros recurrentes');const row=container.querySelector('.forecast-table tbody tr') as HTMLElement;expect(row.classList.contains('critical')).toBe(true);expect(row.classList.contains('selected')).toBe(false);fireEvent.click(row);expect(row.classList.contains('selected')).toBe(true);expect(row.tabIndex).toBe(0)});
-  it('renders legacy prompt without legacy metrics',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{dataMode:'LIVE',available:true,semanticAvailable:false,legacyDetected:true}})));render(<Home/>);await screen.findByText('Snapshot legacy detectado');expect(screen.getByText('Requiere nuevo snapshot semántico.')).toBeTruthy();expect(screen.queryByText('TRABAJO ABIERTO')).toBeNull()});
-  it('renders one empty LIVE state without DEMO content',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{dataMode:'LIVE',available:false}})));render(<Home/>);await screen.findByText('Jira está configurado en modo LIVE, pero aún no existe un snapshot válido.');expect(screen.queryByText('Decisiones que no pueden esperar')).toBeNull();expect(screen.getByText('Ir a Integration Hub')).toBeTruthy();expect(screen.getByText('Ir al Centro de sincronización')).toBeTruthy()});
-  it('preserves the current DEMO experience in DEMO mode',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{dataMode:'DEMO',available:false}})));render(<Home/>);await screen.findByText('Decisiones que no pueden esperar');expect(screen.getByText('Dónde estamos invirtiendo la capacidad')).toBeTruthy()});
-  it('shows LIVE header context with real coverage and sync time',()=>{render(<DataModeBanner live={live}/>);expect(screen.getByText('LIVE DATA')).toBeTruthy();expect(screen.getByText(/Jira Cloud/)).toBeTruthy();expect(screen.getByText(/100% cobertura/)).toBeTruthy();expect(screen.getByText(/PARTIAL/)).toBeTruthy()});
-  it('does not render the Jira display name and keeps account id masked',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response({data:{accountDisplayName:'Real Person',accountIdMasked:'***6ad6',accessibleProjects:5,permissions:'READ_ONLY',durationMs:20},status:'SUCCESS',source:'Jira Cloud',lastUpdated:'2026-08-03T13:38:47.128Z',warnings:[],coverage:100})));render(<JiraIntegrationPanel/>);fireEvent.click(screen.getByText('Probar conexión'));await screen.findByText('Cuenta Jira conectada');expect(screen.queryByText('Real Person')).toBeNull();expect(screen.getByText(/\*\*\*6ad6/)).toBeTruthy()});
-  it('hides DEMO integration cards while the application is LIVE',async()=>{vi.stubGlobal('fetch',vi.fn(()=>response(live)));render(<IntegrationPage/>);await screen.findByText('Conexión Jira Cloud LIVE en modo read-only.');expect(screen.queryByText('Fuentes DEMO y planificadas')).toBeNull()});
-  it('shows enriched incremental snapshot fields and grouped warnings',async()=>{const warnings=Array.from({length:7},(_,i)=>`Recurso ${i+1}: INACCESSIBLE`);vi.stubGlobal('fetch',vi.fn(()=>response({data:[{snapshotId:'jira-2026-long-snapshot-id',previousSnapshotId:'jira-2026-previous-snapshot-id',version:2,syncMode:'INCREMENTAL',correlationId:'corr',status:'PARTIAL',checkpoint:'2026-08-03T13:38:47.128Z',completedAt:'2026-08-03T13:38:47.128Z',projectsAccessible:['CPD','CR','DSP','EMD','ETT'],pagesProcessed:1,issuesProcessed:500,issuesChanged:0,coverage:100,truncated:false,durationMs:32460,warnings}]})));render(<JiraSyncPanel/>);await screen.findByText('v2 · PARTIAL');expect(screen.getAllByText('INCREMENTAL').length).toBeGreaterThan(0);expect(screen.getByText('500 / 0')).toBeTruthy();expect(screen.getByText('7 advertencias de acceso')).toBeTruthy();expect(screen.queryByText('Recurso 6: INACCESSIBLE')).toBeNull()});
+describe('LIVE presentation boundaries', () => {
+  it('renders the executive Q3 experience with four KPIs and collapsed confidence', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url) =>
+        response(String(url).includes('/api/q3/overview') ? q3 : live),
+      ),
+    );
+    const { container } = render(<Home />);
+    await screen.findByText('Resumen Ejecutivo Q3 2026');
+    expect(container.querySelectorAll('.q3-kpi')).toHaveLength(4);
+    expect(screen.queryByText('AVAILABLE')).toBeNull();
+    expect(screen.queryByText(/población aplicable/i)).toBeNull();
+    expect(
+      container.querySelector('.data-confidence')?.hasAttribute('open'),
+    ).toBe(false);
+    expect(screen.queryByText('Decisiones que no pueden esperar')).toBeNull();
+  });
+  it('separates feature execution from production readiness', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url) =>
+        response(String(url).includes('/api/q3/overview') ? q3 : live),
+      ),
+    );
+    const { container } = render(<Home />);
+    await screen.findByText('Forecast de iniciativas');
+    expect(screen.getByText('Cobros recurrentes')).toBeTruthy();
+    expect(screen.getByText(/DSP-42/)).toBeTruthy();
+    expect(screen.getAllByText('100%').length).toBeGreaterThan(0);
+    expect(screen.getByText('4/4 Features')).toBeTruthy();
+    expect(screen.getByText('Risk Gate en curso')).toBeTruthy();
+    expect(screen.queryByText('Confirmar Release')).toBeNull();
+    expect(screen.getAllByText('En riesgo').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Próximas' })).toBeNull();
+    expect(
+      container.querySelectorAll('.forecast-table tbody tr').length,
+    ).toBeLessThanOrEqual(10);
+  });
+  it('keeps portfolio mix in the top KPI row and flow as one chart', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url) =>
+        response(String(url).includes('/api/q3/overview') ? q3 : live),
+      ),
+    );
+    const { container } = render(<Home />);
+    await screen.findByText('Flow to Production');
+    expect(
+      container
+        .querySelector('[data-testid="portfolio-mix-top"]')
+        ?.parentElement?.classList.contains('q3-kpis'),
+    ).toBe(true);
+    expect(container.querySelectorAll('.flow-track')).toHaveLength(1);
+    expect(container.querySelectorAll('.flow-track > i')).toHaveLength(6);
+    expect(
+      container.querySelectorAll('.attention-compact').length,
+    ).toBeLessThanOrEqual(4);
+  });
+  it('uses distinct selected and critical forecast row states', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url) =>
+        response(String(url).includes('/api/q3/overview') ? q3 : live),
+      ),
+    );
+    const { container } = render(<Home />);
+    await screen.findByText('Cobros recurrentes');
+    const row = container.querySelector(
+      '.forecast-table tbody tr',
+    ) as HTMLElement;
+    expect(row.classList.contains('critical')).toBe(true);
+    expect(row.classList.contains('selected')).toBe(false);
+    fireEvent.click(row);
+    expect(row.classList.contains('selected')).toBe(true);
+    expect(row.tabIndex).toBe(0);
+  });
+  it('renders legacy prompt without legacy metrics', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        response({
+          data: {
+            dataMode: 'LIVE',
+            available: true,
+            semanticAvailable: false,
+            legacyDetected: true,
+          },
+        }),
+      ),
+    );
+    render(<Home />);
+    await screen.findByText('Snapshot legacy detectado');
+    expect(screen.getByText('Requiere nuevo snapshot semántico.')).toBeTruthy();
+    expect(screen.queryByText('TRABAJO ABIERTO')).toBeNull();
+  });
+  it('renders one empty LIVE state without DEMO content', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => response({ data: { dataMode: 'LIVE', available: false } })),
+    );
+    render(<Home />);
+    await screen.findByText(
+      'Jira está configurado en modo LIVE, pero aún no existe un snapshot válido.',
+    );
+    expect(screen.queryByText('Decisiones que no pueden esperar')).toBeNull();
+    expect(screen.getByText('Ir a Integration Hub')).toBeTruthy();
+    expect(screen.getByText('Ir al Centro de sincronización')).toBeTruthy();
+  });
+  it('preserves the current DEMO experience in DEMO mode', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => response({ data: { dataMode: 'DEMO', available: false } })),
+    );
+    render(<Home />);
+    await screen.findByText('Decisiones que no pueden esperar');
+    expect(
+      screen.getByText('Dónde estamos invirtiendo la capacidad'),
+    ).toBeTruthy();
+  });
+  it('shows LIVE header context with real coverage and sync time', () => {
+    render(<DataModeBanner live={live} />);
+    expect(screen.getByText('LIVE DATA')).toBeTruthy();
+    expect(screen.getByText(/Jira Cloud/)).toBeTruthy();
+    expect(screen.getByText(/100% cobertura/)).toBeTruthy();
+    expect(screen.getByText(/PARTIAL/)).toBeTruthy();
+  });
+  it('does not render the Jira display name and keeps account id masked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        response({
+          data: {
+            accountDisplayName: 'Real Person',
+            accountIdMasked: '***6ad6',
+            accessibleProjects: 5,
+            permissions: 'READ_ONLY',
+            durationMs: 20,
+          },
+          status: 'SUCCESS',
+          source: 'Jira Cloud',
+          lastUpdated: '2026-08-03T13:38:47.128Z',
+          warnings: [],
+          coverage: 100,
+        }),
+      ),
+    );
+    render(<JiraIntegrationPanel />);
+    fireEvent.click(screen.getByText('Probar conexión'));
+    await screen.findByText('Cuenta Jira conectada');
+    expect(screen.queryByText('Real Person')).toBeNull();
+    expect(screen.getByText(/\*\*\*6ad6/)).toBeTruthy();
+  });
+  it('hides DEMO integration cards while the application is LIVE', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => response(live)),
+    );
+    render(<IntegrationPage />);
+    await screen.findByText('Conexión Jira Cloud LIVE en modo read-only.');
+    expect(screen.queryByText('Fuentes DEMO y planificadas')).toBeNull();
+  });
+  it('shows enriched incremental snapshot fields and grouped warnings', async () => {
+    const warnings = Array.from(
+      { length: 7 },
+      (_, i) => `Recurso ${i + 1}: INACCESSIBLE`,
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        response({
+          data: [
+            {
+              snapshotId: 'jira-2026-long-snapshot-id',
+              previousSnapshotId: 'jira-2026-previous-snapshot-id',
+              version: 2,
+              syncMode: 'INCREMENTAL',
+              correlationId: 'corr',
+              status: 'PARTIAL',
+              checkpoint: '2026-08-03T13:38:47.128Z',
+              completedAt: '2026-08-03T13:38:47.128Z',
+              projectsAccessible: ['CPD', 'CR', 'DSP', 'EMD', 'ETT'],
+              pagesProcessed: 1,
+              issuesProcessed: 500,
+              issuesChanged: 0,
+              coverage: 100,
+              truncated: false,
+              durationMs: 32460,
+              warnings,
+            },
+          ],
+        }),
+      ),
+    );
+    render(<JiraSyncPanel />);
+    await screen.findByText('v2 · PARTIAL');
+    expect(screen.getAllByText('INCREMENTAL').length).toBeGreaterThan(0);
+    expect(screen.getByText('500 / 0')).toBeTruthy();
+    expect(screen.getByText('7 advertencias de acceso')).toBeTruthy();
+    expect(screen.queryByText('Recurso 6: INACCESSIBLE')).toBeNull();
+  });
 });

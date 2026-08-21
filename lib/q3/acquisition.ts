@@ -75,6 +75,10 @@ const issueTypeOf = (issue: Raw) =>
   String(
     ((fieldsOf(issue).issuetype ?? {}) as Record<string, unknown>).name ?? '',
   );
+const issueTypeIdOf = (issue: Raw) =>
+  String(
+    ((fieldsOf(issue).issuetype ?? {}) as Record<string, unknown>).id ?? '',
+  );
 const empty = (value: unknown) =>
   value == null || value === '' || (Array.isArray(value) && value.length === 0);
 function polarisKeys(issue: Raw) {
@@ -223,24 +227,37 @@ export async function acquireQ3Datasets(
     };
   const mainJql = `project = ${config.project} AND issuetype IN (${initiativeTypes}) AND cf[12634] = Q3 ORDER BY key ASC`;
   const controlJql = `project = ${config.project} AND issuetype IN (${initiativeTypes}) AND (cf[12634] = Q3 OR (cf[11944] >= "2026-07-01" AND cf[11944] <= "2026-09-30")) ORDER BY key ASC`;
-  const portfolioQueryable = byId.has('customfield_12634') && byId.has('customfield_11944');
-  const emptyPage: JiraPage<Raw> = {items:[],pagesProcessed:0,truncated:false,partial:true,warnings:[],correlationId:'',durationMs:0};
-  const main = portfolioQueryable ? await searchSafely(
-    client,
-    mainJql,
-    selected,
-    Number.MAX_SAFE_INTEGER,
-    warnings,
-    'Portfolio Q3',
-  ) : emptyPage;
-  const control = portfolioQueryable ? await searchSafely(
-    client,
-    controlJql,
-    selected,
-    Number.MAX_SAFE_INTEGER,
-    warnings,
-    'Control Q3',
-  ) : emptyPage;
+  const portfolioQueryable =
+    byId.has('customfield_12634') && byId.has('customfield_11944');
+  const emptyPage: JiraPage<Raw> = {
+    items: [],
+    pagesProcessed: 0,
+    truncated: false,
+    partial: true,
+    warnings: [],
+    correlationId: '',
+    durationMs: 0,
+  };
+  const main = portfolioQueryable
+    ? await searchSafely(
+        client,
+        mainJql,
+        selected,
+        Number.MAX_SAFE_INTEGER,
+        warnings,
+        'Portfolio Q3',
+      )
+    : emptyPage;
+  const control = portfolioQueryable
+    ? await searchSafely(
+        client,
+        controlJql,
+        selected,
+        Number.MAX_SAFE_INTEGER,
+        warnings,
+        'Control Q3',
+      )
+    : emptyPage;
   const controlOnly = dedupe(control.items).filter(
     (item) => !new Set(main.items.map(keyOf)).has(keyOf(item)),
   );
@@ -340,6 +357,33 @@ export async function acquireQ3Datasets(
           durationMs: 0,
         };
   remaining -= controlByParent.items.length;
+  const matrixKeys = dedupe([...controlByParent.items])
+    .filter(
+      (item) =>
+        issueTypeIdOf(item) === '10210' ||
+        /matriz (de )?riesgos/i.test(issueTypeOf(item)),
+    )
+    .map(keyOf);
+  const riskDomainChildren =
+    remaining > 0 && matrixKeys.length
+      ? await searchSafely(
+          client,
+          `parent in (${matrixKeys.map(quote).join(', ')}) ORDER BY key ASC`,
+          selected,
+          remaining,
+          relationshipWarnings,
+          'Risk Gate domains',
+        )
+      : {
+          items: [],
+          pagesProcessed: 0,
+          truncated: false,
+          partial: false,
+          warnings: [],
+          correlationId: '',
+          durationMs: 0,
+        };
+  remaining -= riskDomainChildren.items.length;
   const explicitControlKeys = [
     ...new Set(
       [...portfolioAll, ...parents, ...features.items].flatMap(
@@ -370,12 +414,14 @@ export async function acquireQ3Datasets(
     ...parents,
     ...features.items,
     ...controlByParent.items,
+    ...riskDomainChildren.items,
     ...explicitControls.items,
   ]);
   const relationTruncated =
     remaining <= 0 ||
     features.truncated ||
     controlByParent.truncated ||
+    riskDomainChildren.truncated ||
     explicitControls.truncated;
   const unresolved = Math.max(0, parentKeys.length - parents.length);
   const relationCoverage = parentKeys.length
@@ -389,7 +435,11 @@ export async function acquireQ3Datasets(
     ) / 100;
   return {
     portfolio: {
-      status: !portfolioQueryable ? 'UNAVAILABLE' : main.partial || warnings.length ? 'PARTIAL' : 'COMPLETED',
+      status: !portfolioQueryable
+        ? 'UNAVAILABLE'
+        : main.partial || warnings.length
+          ? 'PARTIAL'
+          : 'COMPLETED',
       profile: Q3_PORTFOLIO_PROFILE,
       queryScope: 'DSP canonical initiatives with Quarter Q3',
       itemsProcessed: portfolioAll.length,

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeIssue, type SemanticWorkItemV2 } from '@/lib/jira/live';
 import type { SemanticJiraSnapshotRecord } from '@/lib/jira/store';
-import { buildForecastDtos, buildQ3Overview, sanitizeInitiatives } from '@/lib/q3/model';
+import {
+  buildForecastDtos,
+  buildQ3Overview,
+  sanitizeInitiatives,
+} from '@/lib/q3/model';
 import { Q3_CONFIG, Q3_PROFILE_VERSION } from '@/lib/q3/config';
 
 const raw = (
@@ -50,6 +54,40 @@ const feature = (
       parent: { key: parent, fields: { issuetype: { name: 'Epic' } } },
       ...extra,
     }),
+    'https://site',
+  );
+const riskMatrix = (status: string, parent = 'CPD-1') =>
+  normalizeIssue(
+    raw('RISK-1', 'CPD', '10210', status, {
+      issuetype: { id: '10210', name: 'Matriz de Riesgos' },
+      parent: { key: parent },
+    }),
+    'https://site',
+  );
+const riskDomain = (key: string, summary: string, status: string) =>
+  normalizeIssue(
+    raw(key, 'CPD', 'Tarea', status, {
+      summary,
+      parent: {
+        key: 'RISK-1',
+        fields: { issuetype: { id: '10210', name: 'Matriz de Riesgos' } },
+      },
+    }),
+    'https://site',
+  );
+const fiveDomains = (statuses: string[] = Array(5).fill('Finalizado')) =>
+  [
+    'Procesos',
+    'Continuidad del Negocio',
+    'Datos Personales',
+    'Tecnología',
+    'Ciberseguridad y Seguridad de la Información',
+  ].map((name, index) =>
+    riskDomain(`CTRL-${index + 1}`, name, statuses[index]),
+  );
+const planRelease = (status: string) =>
+  normalizeIssue(
+    raw('REL-1', 'CPD', 'Plan Release', status, { parent: { key: 'CPD-1' } }),
     'https://site',
   );
 const polaris = (item: SemanticWorkItemV2, ...keys: string[]) => ({
@@ -300,22 +338,167 @@ describe('Deuna canonical Q3 model', () => {
     expect(restricted).toHaveLength(0);
     expect(JSON.stringify(restricted)).not.toContain('Sensitive');
   });
-  it('does not turn 100% feature execution into on-track when Release is missing', () => {
-    const x = overview([initiative()]);
-    Object.assign(x.initiatives[0], {
-      featureCompletionRatio: 100,
-      featuresCompleted: 4,
-      featuresTotal: 4,
-      progressStatus: 'AVAILABLE',
-      releaseApplicability: 'REQUIRED',
-      release: 'NO_RELEASE_EVIDENCE',
-      targetDate: '2026-09-15',
-    });
+  it('keeps 100% Features in Risk Gate Gestión and never recommends Release', () => {
+    const x = overview([
+      polaris(initiative('Matriz de riesgo'), 'CPD-1'),
+      delivery(),
+      feature('F-1', 'Completado'),
+      feature('F-2', 'Completado'),
+      riskMatrix('Gestión'),
+      ...fiveDomains([
+        'Gestión',
+        'Gestión',
+        'Gestión',
+        'Gestión',
+        'Aprobación por Oficial',
+      ]),
+    ]);
     const result = buildForecastDtos(x, 'Organización', true)[0];
-    expect(result.featureProgress).toMatchObject({ percentage: 100, status: 'COMPLETADO' });
-    expect(result.productionReadiness.status).toBe('NOT_READY');
-    expect(result.forecastStatus).toBe('AT_RISK');
-    expect(result.targetDate).toBe('2026-09-15');
+    expect(result.featureProgress).toMatchObject({
+      percentage: 100,
+      status: 'COMPLETADO',
+    });
+    expect(result.stage).toBe('RISK_GATE');
+    expect(result.recommendedAction).toBe('Completar Risk Gate');
+    expect(JSON.stringify(result)).not.toContain('Confirmar Release');
+  });
+  it('does not enable Release while waiting for official approval', () => {
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        riskMatrix('Aprobación por Oficial'),
+        ...fiveDomains(),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('WAITING_OFFICIAL_APPROVAL');
+    expect(result.recommendedAction).toBe('Esperar aprobación oficial');
+  });
+  it('shows official approval as a parallel signal while Features remain incomplete', () => {
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        feature('F-2', 'En desarrollo'),
+        riskMatrix('Aprobación por Oficial'),
+        ...fiveDomains(),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('FEATURE_EXECUTION');
+    expect(result.gateReadiness.label).toBe('Aprobación oficial pendiente');
+    expect(result.recommendedAction).toBe(
+      'Completar Features · monitorear aprobación oficial',
+    );
+    expect(JSON.stringify(result)).not.toContain('Preparar Release');
+  });
+  it('keeps incomplete Features as the primary stage while Risk Gate works in parallel', () => {
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        feature('F-2', 'En desarrollo'),
+        riskMatrix('Gestión'),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('FEATURE_EXECUTION');
+    expect(result.gateReadiness.label).toBe('Risk Gate en paralelo');
+  });
+  it('shows an approved Risk Gate without advancing incomplete Features', () => {
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        feature('F-2', 'En desarrollo'),
+        riskMatrix('Finalizado'),
+        ...fiveDomains(),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('FEATURE_EXECUTION');
+    expect(result.gateReadiness.label).toBe('Risk Gate aprobado');
+    expect(result.recommendedAction).toBe('Completar Features');
+  });
+  it('requires approved Risk Gate before Release readiness', () => {
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        riskMatrix('Finalizado'),
+        ...fiveDomains(),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('RELEASE_READINESS');
+    expect(result.recommendedAction).toBe('Preparar Release');
+  });
+  it('does not infer production from an approved Release', () => {
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        riskMatrix('Finalizado'),
+        ...fiveDomains(),
+        planRelease('Aprobado'),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('RELEASE_READINESS');
+    expect(result.recommendedAction).toBe('Pendiente evidencia de producción');
+  });
+  it('uses positive production evidence only', () => {
+    const production = { ...delivery(), sourceStatus: 'Producción' };
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        production,
+        feature('F-1', 'Finalizado'),
+        riskMatrix('Finalizado'),
+        ...fiveDomains(),
+        planRelease('Aprobado'),
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result.stage).toBe('PRODUCTION');
+  });
+  it('keeps a blocker transverse to the real Risk Gate stage', () => {
+    const blocker = normalizeIssue(
+      raw('DEP-1', 'CPD', 'Dependencia', 'Bloqueado', {
+        parent: { key: 'CPD-1' },
+      }),
+      'https://site',
+    );
+    const result = buildForecastDtos(
+      overview([
+        polaris(initiative(), 'CPD-1'),
+        delivery(),
+        feature('F-1', 'Finalizado'),
+        riskMatrix('Gestión'),
+        blocker,
+      ]),
+      'Organización',
+      true,
+    )[0];
+    expect(result).toMatchObject({
+      stage: 'RISK_GATE',
+      blocked: true,
+      recommendedAction: 'Resolver bloqueo y completar Risk Gate',
+    });
   });
   it('derives values from snapshot items rather than external fixtures', () => {
     expect(
@@ -332,31 +515,68 @@ describe('Deuna canonical Q3 model', () => {
     ];
     const x = overview(items);
     expect(x.reconciliation.declaredQ3).toBe(
-      x.reconciliation.candidateQ3 + x.reconciliation.noGoQ3 +
-      x.reconciliation.cancelledQ3 + x.reconciliation.committedQ3,
+      x.reconciliation.candidateQ3 +
+        x.reconciliation.noGoQ3 +
+        x.reconciliation.cancelledQ3 +
+        x.reconciliation.committedQ3,
     );
-    expect(new Set(x.initiatives.map((item) => item.canonicalKey)).size).toBe(4);
+    expect(new Set(x.initiatives.map((item) => item.canonicalKey)).size).toBe(
+      4,
+    );
   });
   it('reconciles committed population into exactly one DSP stage', () => {
-    const statuses = ['INN PLANNING', 'Discovery', 'En desarrollo', 'Avanzada', 'Revisión', 'Matriz de riesgo', 'Bloqueado', 'Finalizada', 'Extraño'];
-    const x = overview(statuses.map((status, index) => ({ ...initiative(status), sourceKey: `DSP-${index + 1}` })));
-    const stageTotal = ['notStartedStage','discoveryStage','inExecutionStage','inReviewStage','inRiskGateStage','blockedStage','administrativelyCompletedStage','unknownStage']
-      .reduce((sum, key) => sum + x.reconciliation[key], 0);
+    const statuses = [
+      'INN PLANNING',
+      'Discovery',
+      'En desarrollo',
+      'Avanzada',
+      'Revisión',
+      'Matriz de riesgo',
+      'Bloqueado',
+      'Finalizada',
+      'Extraño',
+    ];
+    const x = overview(
+      statuses.map((status, index) => ({
+        ...initiative(status),
+        sourceKey: `DSP-${index + 1}`,
+      })),
+    );
+    const stageTotal = [
+      'notStartedStage',
+      'discoveryStage',
+      'inExecutionStage',
+      'inReviewStage',
+      'inRiskGateStage',
+      'blockedStage',
+      'administrativelyCompletedStage',
+      'unknownStage',
+    ].reduce((sum, key) => sum + x.reconciliation[key], 0);
     expect(stageTotal).toBe(x.reconciliation.committedQ3);
     expect(x.commitment.inExecution.value).toBe(2);
     expect(x.commitment.notStarted.value).toBe(1);
   });
   it('does not classify a candidate as committed', () => {
     const x = overview([initiative('Parking lot')]);
-    expect(x.initiatives[0]).toMatchObject({ candidateQ3: true, committedQ3: false, commitmentStage: null });
+    expect(x.initiatives[0]).toMatchObject({
+      candidateQ3: true,
+      committedQ3: false,
+      commitmentStage: null,
+    });
   });
   it('derives execution from DSP status rather than delivery evidence', () => {
-    const x = overview([polaris(initiative('INN PLANNING'), 'CPD-1'), delivery()]);
+    const x = overview([
+      polaris(initiative('INN PLANNING'), 'CPD-1'),
+      delivery(),
+    ]);
     expect(x.commitment.inExecution.value).toBe(0);
     expect(x.commitment.notStarted.value).toBe(1);
   });
   it('counts delivery missing only inside REQUIRED', () => {
-    const required = { ...initiative('En desarrollo'), initiativeType: undefined };
+    const required = {
+      ...initiative('En desarrollo'),
+      initiativeType: undefined,
+    };
     const x = overview([
       { ...required, sourceKey: 'DSP-1', issueTypeName: 'Deuda Tecnica' },
       { ...initiative('INN PLANNING'), sourceKey: 'DSP-2' },
@@ -367,8 +587,11 @@ describe('Deuna canonical Q3 model', () => {
   });
   it('uses FEATURE_BASED as FCR denominator and excludes non-feature delivery', () => {
     const x = overview([
-      polaris(initiative(), 'CPD-1'), delivery(), feature('F-1', 'Completado'),
-      polaris({ ...initiative(), sourceKey: 'DSP-2' }, 'CPD-2'), delivery('CPD-2'),
+      polaris(initiative(), 'CPD-1'),
+      delivery(),
+      feature('F-1', 'Completado'),
+      polaris({ ...initiative(), sourceKey: 'DSP-2' }, 'CPD-2'),
+      delivery('CPD-2'),
     ]);
     expect(x.progress.featureApplicable.value).toBe(1);
     expect(x.progress.featureResolved.value).toBe(1);
@@ -376,8 +599,17 @@ describe('Deuna canonical Q3 model', () => {
     expect(x.progress.coverage.value).toBe(100);
   });
   it('uses REQUIRED_NOW and REQUIRED as risk/release denominators', () => {
-    const matrix = normalizeIssue(raw('R-1', 'CPD', 'Matriz de Riesgos', 'TAREAS POR HACER', { parent: { key: 'CPD-1' } }), 'x');
-    const x = overview([polaris(initiative('Revisión'), 'CPD-1'), delivery(), matrix]);
+    const matrix = normalizeIssue(
+      raw('R-1', 'CPD', 'Matriz de Riesgos', 'TAREAS POR HACER', {
+        parent: { key: 'CPD-1' },
+      }),
+      'x',
+    );
+    const x = overview([
+      polaris(initiative('Revisión'), 'CPD-1'),
+      delivery(),
+      matrix,
+    ]);
     expect(x.risk.requiredNow.value).toBe(1);
     expect(x.risk.withMatrix.value).toBe(1);
     expect(x.risk.coverage.value).toBe(100);
