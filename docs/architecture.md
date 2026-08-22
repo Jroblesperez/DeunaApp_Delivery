@@ -1,0 +1,2 @@
+# Arquitectura
+Monolito modular: App Router presenta vistas server/client; componentes reutilizables forman el shell; `lib` contiene dominio, reglas y adaptadores; Route Handlers publican REST; Prisma modela persistencia SQLite local/PostgreSQL objetivo. Los envelopes permiten éxito parcial y evitan que una fuente caída bloquee toda la experiencia. Decisión MVP: repositorio demo en memoria para `npm run dev` sin migraciones; el seed replica el dominio a Prisma.

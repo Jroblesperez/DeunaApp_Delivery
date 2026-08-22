@@ -1,0 +1,2 @@
+# Seguridad
+MVP de uso interno: sesión demo fija, sin credenciales ni passwords, y matriz de autorización server-side preparada. Producción exige `AUTH_MODE=entra`, cookies Secure/HttpOnly/SameSite, validación de issuer/audience/nonce, mapping de grupos a roles y scopes ECO/team. Secretos en vault, Jira solo lectura, mínimo privilegio, CSP/rate limits en el perímetro y AuditLog para acceso/cambios. El selector demo jamás debe habilitarse con `DEMO_MODE=false`.

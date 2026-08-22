@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+*.db
+coverage
+.DS_Store
+
+*.tsbuildinfo
+.env.local
+.env.*.local
+.flowos-live
+.flowos-dev.*.log

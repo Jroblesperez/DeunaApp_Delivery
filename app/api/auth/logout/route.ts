@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';export async function POST(){const response=NextResponse.json(envelope({loggedOut:true,simulation:true}));response.cookies.set('flowos_demo_session','',{httpOnly:true,expires:new Date(0),path:'/'});return response}

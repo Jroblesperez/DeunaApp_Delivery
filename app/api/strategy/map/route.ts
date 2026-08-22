@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';import {strategyMap} from '@/lib/strategy/data';export async function GET(){return NextResponse.json(envelope(strategyMap(),96))}

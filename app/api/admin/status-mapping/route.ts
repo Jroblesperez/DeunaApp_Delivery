@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';import {statusMappings} from '@/lib/enterprise/data';export async function GET(){return NextResponse.json(envelope(statusMappings,Math.round(statusMappings.filter(s=>s.mapped).length/statusMappings.length*100),['Dos estados requieren mapping']))}

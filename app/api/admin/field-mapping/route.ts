@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server';import {envelope} from '@/lib/api';import {fieldMappings} from '@/lib/enterprise/data';export async function GET(){return NextResponse.json(envelope(fieldMappings,91,['Dos conceptos presentan datos insuficientes']))}

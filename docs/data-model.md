@@ -1,0 +1,2 @@
+# Modelo de datos
+`Organization → Eco → Team`; `Okr → Initiative → Feature → WorkItem`; Initiative relaciona Dependency, RiskMatrix/RiskItem, ActionPlan, Release y StageTransition; Team relaciona CapacitySnapshot, Sprint y WorkItem. User/Role/Permission, Supplier, Vulnerability, MetricSnapshot, Insight, RecommendedAction, DataSource y AuditLog completan gobierno. Todos poseen timestamps e índices en estados, fechas y claves de relación. Ver `prisma/schema.prisma`.
