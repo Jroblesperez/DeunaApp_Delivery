@@ -12,6 +12,7 @@ import type {
   DatasetStatus,
   FieldSampleState,
   RelationshipStatus,
+  GovernanceHistoryStatus,
 } from '@/lib/q3/acquisition';
 
 export interface JiraSnapshotBase {
@@ -53,6 +54,7 @@ export interface SemanticJiraSnapshotRecord extends JiraSnapshotBase {
     portfolio: DatasetStatus;
     operational: DatasetStatus;
     relationships: RelationshipStatus;
+    governanceHistory?: GovernanceHistoryStatus;
     fieldDiscovery: Array<{
       id: string;
       name: string | null;

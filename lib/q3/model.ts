@@ -176,6 +176,14 @@ export interface Q3Initiative {
   stageConflicts: string[];
   carryOver:
     'CARRY_OVER' | 'CHRONIC_CARRY_OVER' | 'CROSS_QUARTER_PLANNED' | 'NONE';
+  reasonForDelay: string | null;
+  replanningDeclared: boolean | null;
+  previousTargetDate: string | null;
+  targetDateChangeCount: number;
+  lastTargetDateChangedAt: string | null;
+  quarterChangeCount: number;
+  lastQuarterChangedAt: string | null;
+  hasReplanningEvidence: boolean;
   eco: string | null;
   team: string | null;
   okrClassification:
@@ -923,6 +931,14 @@ function buildInitiative(
     ],
     stageConflicts,
     carryOver,
+    reasonForDelay: item.reasonForDelay?.value ?? null,
+    replanningDeclared: item.replanningDeclared?.value ?? null,
+    previousTargetDate: item.previousTargetDate?.value ?? null,
+    targetDateChangeCount: item.targetDateChangeCount ?? 0,
+    lastTargetDateChangedAt: item.lastTargetDateChangedAt?.value ?? null,
+    quarterChangeCount: item.quarterChangeCount ?? 0,
+    lastQuarterChangedAt: item.lastQuarterChangedAt?.value ?? null,
+    hasReplanningEvidence: item.hasReplanningEvidence ?? false,
     eco: item.resolvedEco.value,
     team: item.resolvedTeam.value,
     okrClassification:

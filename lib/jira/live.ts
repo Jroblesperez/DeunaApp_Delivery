@@ -28,6 +28,9 @@ export const CUSTOM_FIELDS = [
   'customfield_12634',
   'customfield_11372',
   'customfield_13104',
+  'customfield_13110',
+  'customfield_13112',
+  'customfield_13114',
   'customfield_11177',
   'customfield_12981',
   'customfield_10522',
@@ -188,11 +191,26 @@ export interface SemanticWorkItemV2 {
   periodConfidence: Confidence;
   owner: EvidenceField<string>;
   priority: EvidenceField<string>;
+  reasonForDelay: EvidenceField<string>;
+  replanningDeclared: EvidenceField<boolean>;
+  previousTargetDate: EvidenceField<string>;
+  targetDateChangeCount: number;
+  lastTargetDateChangedAt: EvidenceField<string>;
+  quarterChangeCount: number;
+  lastQuarterChangedAt: EvidenceField<string>;
+  hasReplanningEvidence: boolean;
   sourceUrl: string;
   datasetRole?: 'PORTFOLIO' | 'PORTFOLIO_CONTROL' | 'OPERATIONAL' | 'RELATIONSHIP';
   portfolioMembership?: 'DECLARED_Q3' | 'CONTROL_ONLY';
 }
 export type FlowOsWorkItem = SemanticWorkItemV2;
+interface RawGovernanceHistory {
+  previousTargetDate?:string|null;
+  targetDateChangeCount?:number;
+  lastTargetDateChangedAt?:string|null;
+  quarterChangeCount?:number;
+  lastQuarterChangedAt?:string|null;
+}
 const missing = <T>(): EvidenceField<T> => ({ state: 'MISSING', value: null });
 const field = <T>(value: T | null | undefined): EvidenceField<T> =>
   value === null || value === undefined || value === ''
@@ -390,6 +408,10 @@ export function normalizeIssue(
     (x) => typeof x === 'number',
   ) as number | undefined;
   const issueLinks = links(f.issuelinks);
+  const governance=(issue.flowosGovernanceHistory??{}) as RawGovernanceHistory;
+  const reasonForDelay=plain(f.customfield_13104)||plain(f.customfield_13110);
+  const replanningValue=plain(f.customfield_13112);
+  const priorTarget=intervalEnd(f.customfield_13114)||governance.previousTargetDate||null;
   const epicLink =
     typeof f.customfield_10014 === 'string' ? f.customfield_10014 : null;
   return {
@@ -489,6 +511,14 @@ export function normalizeIssue(
     periodConfidence: 'NONE',
     owner: field(plain(f.assignee) || null),
     priority: field(plain(f.priority) || null),
+    reasonForDelay: field(reasonForDelay || null),
+    replanningDeclared: field(replanningValue?/^(si|sí|yes|true|replanificad)/i.test(replanningValue):null),
+    previousTargetDate: dateField(priorTarget),
+    targetDateChangeCount: governance.targetDateChangeCount ?? 0,
+    lastTargetDateChangedAt: dateField(governance.lastTargetDateChangedAt),
+    quarterChangeCount: governance.quarterChangeCount ?? 0,
+    lastQuarterChangedAt: dateField(governance.lastQuarterChangedAt),
+    hasReplanningEvidence:Boolean(priorTarget||reasonForDelay||replanningValue||governance.targetDateChangeCount||governance.quarterChangeCount),
     sourceUrl: `${siteUrl}/browse/${encodeURIComponent(String(issue.key ?? ''))}`,
   };
 }

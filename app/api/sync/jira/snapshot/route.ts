@@ -146,6 +146,7 @@ export async function POST(request: Request) {
       ...acquisition.portfolio.warnings,
       ...acquisition.operational.warnings,
       ...acquisition.relationships.warnings,
+      ...acquisition.governanceHistory.warnings,
     ];
     const completedAt = new Date();
     const checkpoint = operationalChanges.reduce(
@@ -170,6 +171,7 @@ export async function POST(request: Request) {
         portfolio: acquisition.portfolio,
         operational: operationalDataset,
         relationships: acquisition.relationships,
+        governanceHistory: acquisition.governanceHistory,
         fieldDiscovery: acquisition.fieldDiscovery,
         fieldSample: acquisition.fieldSample,
       },
@@ -193,7 +195,8 @@ export async function POST(request: Request) {
         relationships.length,
       pagesProcessed:
         acquisition.portfolio.pagesProcessed +
-        acquisition.operational.pagesProcessed,
+        acquisition.operational.pagesProcessed +
+        acquisition.governanceHistory.pagesProcessed,
       truncated:
         operationalDataset.truncated ||
         acquisition.relationships.truncated,

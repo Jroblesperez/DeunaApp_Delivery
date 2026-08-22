@@ -3,6 +3,8 @@ import type {JiraCredentials} from './credentials';
 export class JiraCloudError extends Error{constructor(public status:number,public code:string,message:string,public correlationId:string){super(message);this.name='JiraCloudError'}}
 type RequestMeta<T>={data:T;correlationId:string;durationMs:number};
 export type JiraPage<T>={items:T[];pagesProcessed:number;truncated:boolean;partial:boolean;warnings:string[];correlationId:string;durationMs:number};
+export interface JiraChangelogItem {field?:string;fieldId?:string;fromString?:string|null;toString?:string|null}
+export interface JiraChangelogEntry {created?:string;items?:JiraChangelogItem[]}
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 const safeMessage=(status:number)=>status===401?'Las credenciales de Jira no son válidas o expiraron.':status===403?'FlowOS se autenticó, pero la cuenta no tiene acceso suficiente.':status===429?'Jira limitó temporalmente las solicitudes.':status>=500?'Jira Cloud no está disponible temporalmente.':'La solicitud read-only a Jira no pudo completarse.';
 
@@ -48,5 +50,13 @@ export class JiraCloudClient{
       catch(error){if(items.length){partial=true;warnings.push(error instanceof JiraCloudError?error.message:'Una página no pudo recuperarse.');break}throw error;}
     }while(nextPageToken&&items.length<limit);
     return {items:items.slice(0,limit),pagesProcessed:pages,truncated:Boolean(nextPageToken)||items.length>limit,partial,warnings,correlationId,durationMs};
+  }
+  async getIssueChangelog(issueKey:string):Promise<JiraPage<JiraChangelogEntry>>{
+    const items:JiraChangelogEntry[]=[];const warnings:string[]=[];let startAt=0,pages=0,total=1,partial=false,correlationId='',durationMs=0;
+    while(startAt<total){
+      try{const response=await this.request<{values:JiraChangelogEntry[];total?:number;isLast?:boolean}>(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/changelog?startAt=${startAt}&maxResults=100`);correlationId=response.correlationId;durationMs+=response.durationMs;pages++;const values=response.data.values??[];items.push(...values);total=response.data.total??items.length;if(response.data.isLast||values.length===0)break;startAt=items.length;}
+      catch(error){if(items.length){partial=true;warnings.push(error instanceof JiraCloudError?error.message:'Una página de historial no pudo recuperarse.');break}throw error;}
+    }
+    return {items,pagesProcessed:pages,truncated:items.length<total,partial,warnings,correlationId,durationMs};
   }
 }

@@ -39,10 +39,20 @@ export interface RelationshipStatus {
   warnings: string[];
   queriedAt: string;
 }
+export interface GovernanceHistoryStatus {
+  status: 'COMPLETED' | 'PARTIAL' | 'UNAVAILABLE';
+  initiativesEvaluated: number;
+  initiativesWithHistory: number;
+  pagesProcessed: number;
+  truncated: boolean;
+  warnings: string[];
+  queriedAt: string;
+}
 export interface Q3Acquisition {
   portfolio: DatasetStatus;
   operational: DatasetStatus;
   relationships: RelationshipStatus;
+  governanceHistory: GovernanceHistoryStatus;
   fieldDiscovery: Array<{
     id: string;
     name: string | null;
@@ -218,6 +228,15 @@ export async function acquireQ3Datasets(
         warnings: [],
         queriedAt,
       },
+      governanceHistory: {
+        status: 'UNAVAILABLE',
+        initiativesEvaluated: 0,
+        initiativesWithHistory: 0,
+        pagesProcessed: 0,
+        truncated: false,
+        warnings: ['Perfil Q3 deshabilitado.'],
+        queriedAt,
+      },
       fieldDiscovery,
       fieldSample: {},
       portfolioMain: [],
@@ -293,7 +312,73 @@ export async function acquireQ3Datasets(
     [],
     'Operational',
   );
-  const portfolioAll = dedupe([...main.items, ...controlOnly]);
+  const portfolioCandidates = dedupe([...main.items, ...controlOnly]);
+  const governanceCandidates = portfolioCandidates.filter((issue) => {
+    const fields = fieldsOf(issue);
+    const quarters = Array.isArray(fields.customfield_12634)
+      ? fields.customfield_12634.map((value) => JSON.stringify(value).toLowerCase())
+      : [];
+    return (
+      quarters.some((value) => value.includes('q1') || value.includes('q2')) ||
+      ['customfield_13104', 'customfield_13110', 'customfield_13112', 'customfield_13114']
+        .some((id) => !empty(fields[id]))
+    );
+  });
+  const governanceWarnings: string[] = [];
+  const governancePages = await pooled(
+    governanceCandidates,
+    config.relationConcurrency,
+    async (issue) => {
+      try {
+        const page = await client.getIssueChangelog(keyOf(issue));
+        governanceWarnings.push(...page.warnings);
+        return { issue, page };
+      } catch {
+        governanceWarnings.push('Historial de gobernanza: INACCESSIBLE');
+        return { issue, page: null };
+      }
+    },
+  );
+  const dateFrom = (value: string | null | undefined) =>
+    value?.match(/\d{4}-\d{2}-\d{2}/g)?.at(-1) ?? null;
+  const governanceByKey = new Map(
+    governancePages.map(({ issue, page }) => {
+      const targetChanges = (page?.items ?? []).flatMap((entry) =>
+        (entry.items ?? [])
+          .filter((change) =>
+            ['customfield_11944', 'Fecha de cierre'].includes(
+              String(change.fieldId ?? change.field ?? ''),
+            ),
+          )
+          .map((change) => ({ created: entry.created ?? null, from: change.fromString ?? null })),
+      );
+      const quarterChanges = (page?.items ?? []).flatMap((entry) =>
+        (entry.items ?? [])
+          .filter((change) =>
+            ['customfield_12634', 'Quarter'].includes(
+              String(change.fieldId ?? change.field ?? ''),
+            ),
+          )
+          .map(() => ({ created: entry.created ?? null })),
+      );
+      const lastTarget = targetChanges.at(-1);
+      const lastQuarter = quarterChanges.at(-1);
+      return [
+        keyOf(issue),
+        {
+          previousTargetDate: dateFrom(lastTarget?.from),
+          targetDateChangeCount: targetChanges.length,
+          lastTargetDateChangedAt: lastTarget?.created ?? null,
+          quarterChangeCount: quarterChanges.length,
+          lastQuarterChangedAt: lastQuarter?.created ?? null,
+        },
+      ];
+    }),
+  );
+  const portfolioAll = portfolioCandidates.map((issue) => ({
+    ...issue,
+    flowosGovernanceHistory: governanceByKey.get(keyOf(issue)),
+  }));
   const parentKeys = [...new Set(portfolioAll.flatMap(polarisKeys))];
   const relationshipWarnings: string[] = [];
   let remaining = config.relationMaxIssues;
@@ -482,10 +567,32 @@ export async function acquireQ3Datasets(
       warnings: relationshipWarnings,
       queriedAt,
     },
+    governanceHistory: {
+      status: governanceCandidates.length
+        ? governanceWarnings.length
+          ? 'PARTIAL'
+          : 'COMPLETED'
+        : 'UNAVAILABLE',
+      initiativesEvaluated: governanceCandidates.length,
+      initiativesWithHistory: [...governanceByKey.values()].filter(
+        (history) => history.targetDateChangeCount || history.quarterChangeCount,
+      ).length,
+      pagesProcessed: governancePages.reduce(
+        (total, result) => total + (result.page?.pagesProcessed ?? 0),
+        0,
+      ),
+      truncated: governancePages.some((result) => result.page?.truncated),
+      warnings: [...new Set(governanceWarnings)],
+      queriedAt,
+    },
     fieldDiscovery,
     fieldSample,
-    portfolioMain: main.items,
-    portfolioControl: controlOnly,
+    portfolioMain: portfolioAll.filter((item) =>
+      new Set(main.items.map(keyOf)).has(keyOf(item)),
+    ),
+    portfolioControl: portfolioAll.filter((item) =>
+      new Set(controlOnly.map(keyOf)).has(keyOf(item)),
+    ),
     operationalItems: operational.items,
     relationshipItems,
   };
